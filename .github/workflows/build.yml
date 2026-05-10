@@ -20,9 +20,14 @@ jobs:
 
       - name: Fix project structure and keep user code
         run: |
+          # 备份你写的代码
           cp lib/main.dart /tmp/main.dart
           cp pubspec.yaml /tmp/pubspec.yaml
-          flutter create . --force
+          # 安全清空整个项目目录，但保留 .git
+          find . -maxdepth 1 ! -name '.git' ! -name '.' ! -name '..' -exec rm -rf {} +
+          # 重新生成 Flutter 工程（本地生成 Android、Gradle 等）
+          flutter create --project-name alive_ai .
+          # 恢复你的代码
           cp /tmp/main.dart lib/main.dart
           cp /tmp/pubspec.yaml pubspec.yaml
 
