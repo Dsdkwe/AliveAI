@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'pages/model_page.dart';
+import 'pages/config_page.dart';
+import 'pages/chat_page.dart';
+import 'pages/plugin_page.dart';
 
 void main() {
   runApp(const HalfHeartedAIApp());
@@ -6,7 +10,6 @@ void main() {
 
 class HalfHeartedAIApp extends StatelessWidget {
   const HalfHeartedAIApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -22,36 +25,27 @@ class HalfHeartedAIApp extends StatelessWidget {
 }
 
 const String announcementTitle = '公告';
-const String announcementContent = '''
-欢迎使用 Half-hearted AI！
-
-这是一条可以自己修改的公告内容。
-你可以在代码里找到 announcementContent 变量，把它改成任何你想说的话。
-''';
+const String announcementContent = '欢迎使用 Half-hearted AI！\n\n这是一条可以自己修改的公告内容。';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
-
   @override
   State<MainPage> createState() => _MainPageState();
 }
 
 class _MainPageState extends State<MainPage> {
   int _currentIndex = 0;
-
   final List<Widget> _pages = const [
-    Center(child: Text('模型页面', style: TextStyle(fontSize: 18))),
-    Center(child: Text('配置页面', style: TextStyle(fontSize: 18))),
-    Center(child: Text('对话页面', style: TextStyle(fontSize: 18))),
-    Center(child: Text('插件页面', style: TextStyle(fontSize: 18))),
+    ModelPage(),
+    ConfigPage(),
+    ChatPage(),
+    PluginPage(),
   ];
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showAnnouncement();
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _showAnnouncement());
   }
 
   void _showAnnouncement() {
@@ -59,14 +53,9 @@ class _MainPageState extends State<MainPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text(announcementTitle),
-        content: const SingleChildScrollView(
-          child: Text(announcementContent),
-        ),
+        content: const SingleChildScrollView(child: Text(announcementContent)),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('我知道了'),
-          ),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('我知道了')),
         ],
       ),
     );
@@ -77,18 +66,8 @@ class _MainPageState extends State<MainPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Half-hearted AI'),
-        leading: IconButton(
-          icon: const Icon(Icons.settings),
-          tooltip: '设置',
-          onPressed: () {},
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.menu),
-            tooltip: '多功能菜单',
-            onPressed: () {},
-          ),
-        ],
+        leading: IconButton(icon: const Icon(Icons.settings), tooltip: '设置', onPressed: () {}),
+        actions: [IconButton(icon: const Icon(Icons.menu), tooltip: '多功能菜单', onPressed: () {})],
       ),
       body: _pages[_currentIndex],
       bottomNavigationBar: BottomNavigationBar(
@@ -96,22 +75,10 @@ class _MainPageState extends State<MainPage> {
         onTap: (index) => setState(() => _currentIndex = index),
         type: BottomNavigationBarType.fixed,
         items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.model_training),
-            label: '模型',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.tune),
-            label: '配置',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.chat_bubble_outline),
-            label: '对话',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.extension),
-            label: '插件',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.model_training), label: '模型'),
+          BottomNavigationBarItem(icon: Icon(Icons.tune), label: '配置'),
+          BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: '对话'),
+          BottomNavigationBarItem(icon: Icon(Icons.extension), label: '插件'),
         ],
       ),
     );

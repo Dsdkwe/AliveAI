@@ -1,8 +1,6 @@
 name: alive_ai
-description: My first Flutter app
-
+description: Half-hearted AI
 publish_to: 'none'
-
 version: 1.0.0+1
 
 environment:
@@ -11,10 +9,15 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  file_picker: ^6.1.1
+  path_provider: ^2.1.1
+  permission_handler: ^11.1.0
+  path: ^1.8.3
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_lints: ^3.0.0
 
 flutter:
   uses-material-design: true
