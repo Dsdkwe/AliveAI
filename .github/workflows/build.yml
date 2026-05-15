@@ -20,16 +20,29 @@ jobs:
 
       - name: Fix project structure and keep user code
         run: |
+          # 备份你的代码和资源
           cp lib/main.dart /tmp/main.dart
           cp pubspec.yaml /tmp/pubspec.yaml
+          if [ -d assets ]; then cp -r assets /tmp/assets; fi
+
+          # 清空目录（保留 .git）
           find . -maxdepth 1 ! -name '.git' ! -name '.' ! -name '..' -exec rm -rf {} +
+
+          # 重建 Flutter 工程
           flutter create --project-name alive_ai .
+
+          # 恢复你的代码和资源
           cp /tmp/main.dart lib/main.dart
           cp /tmp/pubspec.yaml pubspec.yaml
+          if [ -d /tmp/assets ]; then cp -r /tmp/assets assets; fi
 
+          # 改名
           sed -i 's/android:label=".*"/android:label="Half-hearted AI"/' android/app/src/main/AndroidManifest.xml
-          # 图标占位：以后你放了 assets/ic_launcher.png 就把下面这行前面的 # 删掉
-          cp assets/ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+
+          # 替换图标（如果 assets 文件夹被恢复并有图标）
+          if [ -f assets/ic_launcher.png ]; then
+            cp assets/ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+          fi
 
       - name: Get dependencies
         run: flutter pub get
