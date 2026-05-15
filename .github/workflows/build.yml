@@ -31,7 +31,7 @@ jobs:
           cp /tmp/pubspec.yaml pubspec.yaml
           if [ -d /tmp/assets ]; then cp -r /tmp/assets assets; fi
 
-          # 注入存储权限声明
+          # 注入存储权限
           sed -i '/<application/i\    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>' android/app/src/main/AndroidManifest.xml
           sed -i '/<application/i\    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>' android/app/src/main/AndroidManifest.xml
           sed -i '/<application/i\    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>' android/app/src/main/AndroidManifest.xml

@@ -22,7 +22,6 @@ class _ModelPageState extends State<ModelPage> {
   }
 
   Future<void> _initDir() async {
-    // 请求存储权限（Android 13+需要细分权限，先确保老方式）
     if (await Permission.manageExternalStorage.request().isGranted ||
         await Permission.storage.request().isGranted) {
       final dir = Directory(modelDir);
@@ -31,7 +30,6 @@ class _ModelPageState extends State<ModelPage> {
       }
       await _refreshList();
     } else {
-      // 权限被拒，引导去设置
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('需要存储权限才能管理模型文件')),
@@ -55,7 +53,6 @@ class _ModelPageState extends State<ModelPage> {
   }
 
   Future<void> _pickAndCopyModel() async {
-    // 打开文件选择器，支持常见模型格式
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['moc3', 'model3.json', 'glb', 'gltf', 'vrm', 'fbx', 'obj', 'dat', 'bin', 'zip'],
