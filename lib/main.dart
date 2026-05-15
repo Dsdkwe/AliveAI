@@ -21,9 +21,6 @@ class HalfHeartedAIApp extends StatelessWidget {
   }
 }
 
-// ============================================
-// 公告内容（你自己改这里的文字就行）
-// ============================================
 const String announcementTitle = '公告';
 const String announcementContent = '''
 欢迎使用 Half-hearted AI！
@@ -43,20 +40,15 @@ class _MainPageState extends State<MainPage> {
   int _currentIndex = 0;
 
   final List<Widget> _pages = const [
-    // 模型
     Center(child: Text('模型页面', style: TextStyle(fontSize: 18))),
-    // 配置
     Center(child: Text('配置页面', style: TextStyle(fontSize: 18))),
-    // 对话
     Center(child: Text('对话页面', style: TextStyle(fontSize: 18))),
-    // 插件
     Center(child: Text('插件页面', style: TextStyle(fontSize: 18))),
   ];
 
   @override
   void initState() {
     super.initState();
-    // 刚进去时弹出公告悬浮窗
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _showAnnouncement();
     });
@@ -83,29 +75,22 @@ class _MainPageState extends State<MainPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // ===== 顶部栏 =====
       appBar: AppBar(
         title: const Text('Half-hearted AI'),
         leading: IconButton(
           icon: const Icon(Icons.settings),
           tooltip: '设置',
-          onPressed: () {
-            // TODO: 设置页面
-          },
+          onPressed: () {},
         ),
         actions: [
           IconButton(
             icon: const Icon(Icons.menu),
             tooltip: '多功能菜单',
-            onPressed: () {
-              // TODO: 多功能菜单
-            },
+            onPressed: () {},
           ),
         ],
       ),
-      // ===== 中间留白区域（根据底部按钮切换） =====
       body: _pages[_currentIndex],
-      // ===== 底部四个功能键 =====
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),
