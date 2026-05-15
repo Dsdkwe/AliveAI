@@ -29,7 +29,7 @@ jobs:
 
           sed -i 's/android:label=".*"/android:label="Half-hearted AI"/' android/app/src/main/AndroidManifest.xml
           # 图标占位：以后你放了 assets/ic_launcher.png 就把下面这行前面的 # 删掉
-          # cp assets/ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+          cp assets/ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
 
       - name: Get dependencies
         run: flutter pub get
