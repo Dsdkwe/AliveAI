@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:flutter_tts/flutter_tts.dart';
 import 'config_page.dart';
 
 class ChatPage extends StatefulWidget {
@@ -18,10 +20,24 @@ class _ChatPageState extends State<ChatPage> {
   bool _isLoading = false;
   final ScrollController _scrollController = ScrollController();
 
+  // 语音
+  late stt.SpeechToText _speech;
+  bool _isListening = false;
+  final FlutterTts _flutterTts = FlutterTts();
+
   @override
   void initState() {
     super.initState();
+    _speech = stt.SpeechToText();
     _loadConfigs();
+    _initTts();
+  }
+
+  Future<void> _initTts() async {
+    await _flutterTts.setLanguage("zh-CN");
+    await _flutterTts.setSpeechRate(0.5);
+    await _flutterTts.setVolume(1.0);
+    await _flutterTts.setPitch(1.0);
   }
 
   Future<void> _loadConfigs() async {
@@ -101,6 +117,7 @@ class _ChatPageState extends State<ChatPage> {
         setState(() {
           _messages.add({'role': 'assistant', 'content': reply});
         });
+        _speak(reply);
       } else {
         final body = jsonDecode(response.body);
         final errorMsg = body['error']?['message'] ?? '未知错误';
@@ -118,6 +135,37 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  Future<void> _startListening() async {
+    bool available = await _speech.initialize(
+      onStatus: (val) => print('onStatus: $val'),
+      onError: (val) => print('onError: $val'),
+    );
+    if (available) {
+      setState(() => _isListening = true);
+      _speech.listen(
+        onResult: (val) {
+          setState(() {
+            _textController.text = val.recognizedWords;
+          });
+          if (val.finalResult) {
+            setState(() => _isListening = false);
+            _sendMessage();
+          }
+        },
+        localeId: "zh_CN",
+      );
+    }
+  }
+
+  void _stopListening() {
+    _speech.stop();
+    setState(() => _isListening = false);
+  }
+
+  Future<void> _speak(String text) async {
+    await _flutterTts.speak(text);
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -128,6 +176,13 @@ class _ChatPageState extends State<ChatPage> {
         );
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _speech.cancel();
+    _flutterTts.stop();
+    super.dispose();
   }
 
   @override
@@ -174,7 +229,7 @@ class _ChatPageState extends State<ChatPage> {
           if (_isLoading)
             const Padding(
               padding: EdgeInsets.all(8.0),
-              child: Text('正在输入...', style: TextStyle(color: Colors.grey)),
+              child: Text('AI 正在思考...', style: TextStyle(color: Colors.grey)),
             ),
           Padding(
             padding: const EdgeInsets.all(8.0),
@@ -190,7 +245,11 @@ class _ChatPageState extends State<ChatPage> {
                     onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
-                const SizedBox(width: 8),
+                IconButton(
+                  icon: Icon(_isListening ? Icons.mic : Icons.mic_none),
+                  color: _isListening ? Colors.red : null,
+                  onPressed: _isListening ? _stopListening : _startListening,
+                ),
                 IconButton(
                   icon: const Icon(Icons.send),
                   onPressed: _sendMessage,

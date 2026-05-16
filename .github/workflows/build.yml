@@ -19,35 +19,21 @@ jobs:
 
       - name: Fix project structure and keep user code
         run: |
-          # 备份整个 lib、pubspec.yaml 和 assets
           if [ -d lib ]; then cp -r lib /tmp/lib; fi
           cp pubspec.yaml /tmp/pubspec.yaml
           if [ -d assets ]; then cp -r assets /tmp/assets; fi
-
-          # 清空目录（保留 .git）
           find . -maxdepth 1 ! -name '.git' ! -name '.' ! -name '..' -exec rm -rf {} +
-
-          # 重建 Flutter 工程
           flutter create --project-name alive_ai .
-
-          # 恢复用户代码
           if [ -d /tmp/lib ]; then rm -rf lib && cp -r /tmp/lib lib; fi
           cp /tmp/pubspec.yaml pubspec.yaml
           if [ -d /tmp/assets ]; then cp -r /tmp/assets assets; fi
-
-          # 创建固定的 debug 签名（别名 androiddebugkey，密码 android）
           keytool -genkey -v -keystore android/app/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" || true
-
-          # 注入存储和网络权限
           sed -i '/<application/i\    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>' android/app/src/main/AndroidManifest.xml
           sed -i '/<application/i\    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>' android/app/src/main/AndroidManifest.xml
           sed -i '/<application/i\    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>' android/app/src/main/AndroidManifest.xml
           sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET"/>' android/app/src/main/AndroidManifest.xml
-
-          # 改应用名
+          sed -i '/<application/i\    <uses-permission android:name="android.permission.RECORD_AUDIO"/>' android/app/src/main/AndroidManifest.xml
           sed -i 's/android:label=".*"/android:label="Half-hearted AI"/' android/app/src/main/AndroidManifest.xml
-
-          # 替换图标
           if [ -f assets/ic_launcher.png ]; then
             cp assets/ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
           fi
