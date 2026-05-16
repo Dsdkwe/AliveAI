@@ -20,7 +20,6 @@ class _ChatPageState extends State<ChatPage> {
   bool _isLoading = false;
   final ScrollController _scrollController = ScrollController();
 
-  // 语音
   late stt.SpeechToText _speech;
   bool _isListening = false;
   final FlutterTts _flutterTts = FlutterTts();
