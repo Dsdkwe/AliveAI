@@ -19,27 +19,41 @@ jobs:
 
       - name: Fix project structure and keep user code
         run: |
+          # 备份
           if [ -d lib ]; then cp -r lib /tmp/lib; fi
           cp pubspec.yaml /tmp/pubspec.yaml
           if [ -d assets ]; then cp -r assets /tmp/assets; fi
+
+          # 清空
           find . -maxdepth 1 ! -name '.git' ! -name '.' ! -name '..' -exec rm -rf {} +
+
+          # 重建
           flutter create --project-name alive_ai .
+
+          # 恢复
           if [ -d /tmp/lib ]; then rm -rf lib && cp -r /tmp/lib lib; fi
           cp /tmp/pubspec.yaml pubspec.yaml
           if [ -d /tmp/assets ]; then cp -r /tmp/assets assets; fi
 
-          # 升级 Kotlin 版本
-          sed -i 's/ext.kotlin_version = .*/ext.kotlin_version = "2.1.0"/' android/build.gradle
-          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 36/' android/app/build.gradle
+          # 安全修改 compileSdkVersion 到 36（支持新旧格式）
+          if [ -f android/app/build.gradle ]; then
+            sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 36/' android/app/build.gradle
+          elif [ -f android/app/build.gradle.kts ]; then
+            sed -i 's/compileSdkVersion = flutter.compileSdkVersion/compileSdkVersion = 36/' android/app/build.gradle.kts
+          fi
 
+          # 固定签名
           keytool -genkey -v -keystore android/app/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" || true
 
-          sed -i '/<application/i\    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>' android/app/src/main/AndroidManifest.xml
-          sed -i '/<application/i\    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>' android/app/src/main/AndroidManifest.xml
-          sed -i '/<application/i\    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>' android/app/src/main/AndroidManifest.xml
-          sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET"/>' android/app/src/main/AndroidManifest.xml
-          sed -i '/<application/i\    <uses-permission android:name="android.permission.RECORD_AUDIO"/>' android/app/src/main/AndroidManifest.xml
+          # 注入权限
+          for perm in READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE MANAGE_EXTERNAL_STORAGE INTERNET RECORD_AUDIO; do
+            sed -i "/<application/i\    <uses-permission android:name=\"android.permission.$perm\"/>" android/app/src/main/AndroidManifest.xml
+          done
+
+          # 改名
           sed -i 's/android:label=".*"/android:label="Half-hearted AI"/' android/app/src/main/AndroidManifest.xml
+
+          # 替换图标
           if [ -f assets/ic_launcher.png ]; then
             cp assets/ic_launcher.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
           fi
