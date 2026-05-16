@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:uuid/uuid.dart';
+import 'package:http/http.dart' as http;
 
 class ApiConfig {
   final String id;
@@ -18,7 +19,6 @@ class ApiConfig {
     this.model = '',
   });
 
-  // 序列化为JSON
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
@@ -27,7 +27,6 @@ class ApiConfig {
         'model': model,
       };
 
-  // 从JSON创建
   factory ApiConfig.fromJson(Map<String, dynamic> json) => ApiConfig(
         id: json['id'],
         name: json['name'],
@@ -37,7 +36,6 @@ class ApiConfig {
       );
 }
 
-// 预置的常用API提供商（地址已填好）
 const List<Map<String, String>> presets = [
   {
     'name': '硅基流动 (SiliconFlow)',
@@ -98,7 +96,6 @@ class _ConfigPageState extends State<ConfigPage> {
   }
 
   Future<void> _addConfig() async {
-    // 显示添加对话框
     await showDialog(
       context: context,
       builder: (ctx) => _ApiFormDialog(
@@ -118,6 +115,45 @@ class _ConfigPageState extends State<ConfigPage> {
       _configs.removeWhere((c) => c.id == id);
     });
     await _saveConfigs();
+  }
+
+  Future<void> _testConnection(ApiConfig config) async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('正在测试连接...'), duration: Duration(seconds: 1)),
+    );
+
+    try {
+      final response = await http.post(
+        Uri.parse(config.baseUrl),
+        headers: {
+          'Authorization': 'Bearer ${config.apiKey}',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'model': config.model,
+          'messages': [
+            {'role': 'user', 'content': 'Hi'}
+          ],
+          'max_tokens': 5,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('连接成功！'), backgroundColor: Colors.green),
+        );
+      } else {
+        final body = jsonDecode(response.body);
+        final errorMsg = body['error']?['message'] ?? '未知错误';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('连接失败: $errorMsg (${response.statusCode})'), backgroundColor: Colors.red),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('连接失败: $e'), backgroundColor: Colors.red),
+      );
+    }
   }
 
   @override
@@ -144,15 +180,24 @@ class _ConfigPageState extends State<ConfigPage> {
                   itemBuilder: (context, index) {
                     final config = _configs[index];
                     return Card(
-                      margin: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
+                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       child: ListTile(
                         title: Text(config.name),
                         subtitle: Text(
                             '模型: ${config.model}\n密钥: ${config.apiKey.isEmpty ? "未填写" : "●●●${config.apiKey.substring(config.apiKey.length - 4)}"}'),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () => _deleteConfig(config.id),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.wifi_find, color: Colors.blue),
+                              tooltip: '测试连接',
+                              onPressed: () => _testConnection(config),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              onPressed: () => _deleteConfig(config.id),
+                            ),
+                          ],
                         ),
                       ),
                     );
@@ -168,7 +213,6 @@ class _ConfigPageState extends State<ConfigPage> {
   }
 }
 
-// 添加/编辑API的表单对话框
 class _ApiFormDialog extends StatefulWidget {
   final Function(ApiConfig) onSave;
   final List<Map<String, String>> presets;
@@ -227,7 +271,6 @@ class _ApiFormDialogState extends State<_ApiFormDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 预置提供商下拉选择
               DropdownButtonFormField<String>(
                 decoration: const InputDecoration(labelText: '选择预置API'),
                 value: _selectedPreset,
@@ -248,26 +291,22 @@ class _ApiFormDialogState extends State<_ApiFormDialog> {
               TextFormField(
                 controller: _nameController,
                 decoration: const InputDecoration(labelText: '配置名称'),
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? '请输入名称' : null,
+                validator: (v) => v == null || v.trim().isEmpty ? '请输入名称' : null,
               ),
               TextFormField(
                 controller: _baseUrlController,
                 decoration: const InputDecoration(labelText: 'API地址'),
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? '请输入API地址' : null,
+                validator: (v) => v == null || v.trim().isEmpty ? '请输入API地址' : null,
               ),
               TextFormField(
                 controller: _apiKeyController,
                 decoration: const InputDecoration(labelText: 'API密钥'),
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? '请输入密钥' : null,
+                validator: (v) => v == null || v.trim().isEmpty ? '请输入密钥' : null,
               ),
               TextFormField(
                 controller: _modelController,
                 decoration: const InputDecoration(labelText: '模型名称'),
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? '请输入模型名称' : null,
+                validator: (v) => v == null || v.trim().isEmpty ? '请输入模型名称' : null,
               ),
             ],
           ),
