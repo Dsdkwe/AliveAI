@@ -20,15 +20,9 @@ jobs:
           restore-keys: |
             Library-${{ runner.os }}-2022.3.22f1-
 
-      - name: Activate Unity License
-        uses: game-ci/unity-license-activate@0.1.0
-        with:
-          unityVersion: 2022.3.22f1
-        env:
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-
       - uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
         with:
           projectPath: unity
           targetPlatform: Android
