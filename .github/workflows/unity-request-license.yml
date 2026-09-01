@@ -13,6 +13,7 @@ jobs:
         continue-on-error: true
         with:
           unityVersion: 2022.3.22f1
+          targetPlatform: Android
           projectPath: unity
           skipActivation: true
           customParameters: -createManualActivationFile -quit -nographics
