@@ -1,0 +1,6 @@
+{
+  "base_url": "https://api.deepseek.com",
+  "model": "deepseek-v4-flash",
+  "voice": "zh-CN-XiaoyiNeural",
+  "persona": "你的名字叫720，说话自然、友善、简洁。不用'主人'这类称呼，像普通朋友一样交流。"
+}
