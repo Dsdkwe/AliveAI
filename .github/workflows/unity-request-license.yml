@@ -8,15 +8,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Create .alf
-        uses: game-ci/unity-builder@v4
-        continue-on-error: true
-        with:
-          unityVersion: 2022.3.22f1
-          targetPlatform: Android
-          projectPath: unity
-          skipActivation: true
-          customParameters: -createManualActivationFile -quit -nographics
+      - name: Generate .alf
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            unityci/editor:ubuntu-2022.3.22f1-android-3.1.0 \
+            -batchmode -nographics -createManualActivationFile -quit \
+            -logFile /workspace/alf.log || true
       - name: Upload .alf
         uses: actions/upload-artifact@v4
         if: always()
