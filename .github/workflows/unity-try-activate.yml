@@ -1,0 +1,41 @@
+name: Unity Try Direct Activate
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  activate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Try email/password activation
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          mkdir -p lic
+          docker run --rm \
+            -v "$PWD/lic:/capture" \
+            -w /capture \
+            -e UNITY_EMAIL \
+            -e UNITY_PASSWORD \
+            unityci/editor:ubuntu-2022.3.22f1-android-3.1.0 \
+            bash -c '
+              /opt/unity/Editor/Unity -batchmode -nographics \
+                -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" -quit \
+                -logFile /capture/activate.log || true
+              ulf=$(find / -name "Unity_lic.ulf" 2>/dev/null | head -1)
+              echo "ULF_PATH=$ulf"
+              if [ -n "$ulf" ]; then cp "$ulf" /capture/Unity_lic.ulf; echo "copied"; fi
+            '
+          echo "---- 激活日志尾部 ----"
+          tail -n 60 lic/activate.log || true
+          echo "---- 捕获到的文件 ----"
+          ls -la lic/
+      - name: Upload .ulf
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Unity-license-ulf
+          path: lic/Unity_lic.ulf
+          if-no-files-found: warn
