@@ -1,0 +1,69 @@
+name: Godot Build Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'godot/**'
+      - '.github/workflows/godot-build.yml'
+
+env:
+  GODOT_VERSION: "4.4.1"   # 以后升级只改这一处
+
+jobs:
+  build-android:
+    name: Build debug APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17 (for APK signing)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Download Godot editor
+        run: |
+          curl -fsSL -o godot.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip
+          mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot-bin
+          chmod +x godot-bin
+          ./godot-bin --version
+
+      - name: Install Godot export templates
+        run: |
+          curl -fsSL -o templates.tpz "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          unzip -q templates.tpz -d "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+
+      - name: Import project (catch script/scene errors early)
+        run: ./godot-bin --headless --path godot --import
+
+      - name: Create Android debug keystore
+        run: |
+          mkdir -p godot/android
+          keytool -genkeypair -v \
+            -keystore godot/android/debug.keystore \
+            -storepass android -keypass android \
+            -alias androiddebugkey -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Export debug APK
+        run: |
+          mkdir -p godot/build
+          ./godot-bin --headless --path godot \
+            --export-debug "Android" "build/halfhearted-debug.apk"
+          ls -lh godot/build/
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: halfhearted-debug-apk
+          path: godot/build/halfhearted-debug.apk
+          if-no-files-found: error
