@@ -1,15 +1,14 @@
 extends Node3D
 
-# --- 3D ---
 var _avatar: Node3D = null
 var _cube: MeshInstance3D = null
 var _cam: Camera3D = null
 
-# --- UI ---
 var _ui_layer: CanvasLayer = null
 var _menu_btn: Button = null
 var _sidebar: PanelContainer = null
 var _sidebar_open := false
+var _sidebar_w := 340.0
 var _status: Label = null
 var _model_box: VBoxContainer = null
 var _scale_slider: HSlider = null
@@ -17,17 +16,15 @@ var _rot_slider: HSlider = null
 var _dist_slider: HSlider = null
 var _pitch_slider: HSlider = null
 
-# --- 相机参数 ---
 var _cam_distance := 3.0
 var _cam_pitch := 15.0
 var _cam_yaw := 0.0
 
-# --- 触摸 ---
-var _drag_active := false
-var _last_touch := Vector2.ZERO
+var _touches: Dictionary = {}
+var _pinch_dist := -1.0
+var _pinch_mid := Vector2.ZERO
 
 const MODEL_DIR := "res://assets/models"
-const SIDEBAR_W := 340.0
 
 func _ready() -> void:
 	_setup_environment()
@@ -38,13 +35,50 @@ func _ready() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
-		_drag_active = event.pressed
-		_last_touch = event.position
+		var t := event as InputEventScreenTouch
+		if t.pressed:
+			_touches[t.index] = t.position
+		else:
+			_touches.erase(t.index)
+		if _touches.size() == 2:
+			var pts: Array = _touches.values()
+			var p0: Vector2 = pts[0]
+			var p1: Vector2 = pts[1]
+			_pinch_dist = p0.distance_to(p1)
+			_pinch_mid = (p0 + p1) * 0.5
+		else:
+			_pinch_dist = -1.0
 		return
-	if event is InputEventScreenDrag and _drag_active and _avatar:
-		var drag := event as InputEventScreenDrag
-		_avatar.rotate_y((drag.position.x - _last_touch.x) * 0.01)
-		_last_touch = drag.position
+	if event is InputEventScreenDrag:
+		var d := event as InputEventScreenDrag
+		if not _touches.has(d.index):
+			return
+		_touches[d.index] = d.position
+		if _touches.size() == 1:
+			if _avatar:
+				_avatar.rotate_y(d.relative.x * 0.01)
+		elif _touches.size() == 2:
+			_handle_pinch()
+
+func _handle_pinch() -> void:
+	var pts: Array = _touches.values()
+	var p0: Vector2 = pts[0]
+	var p1: Vector2 = pts[1]
+	var dist: float = p0.distance_to(p1)
+	var mid: Vector2 = (p0 + p1) * 0.5
+	if _pinch_dist > 0.0:
+		var scale_factor: float = dist / _pinch_dist
+		_cam_distance = clamp(_cam_distance / scale_factor, 1.0, 8.0)
+		if _dist_slider:
+			_dist_slider.value = _cam_distance
+		var delta: Vector2 = mid - _pinch_mid
+		_cam_yaw -= delta.x * 0.2
+		_cam_pitch = clamp(_cam_pitch + delta.y * 0.2, -45.0, 75.0)
+		if _pitch_slider:
+			_pitch_slider.value = _cam_pitch
+		_update_camera()
+	_pinch_dist = dist
+	_pinch_mid = mid
 
 func _load_vrm(path: String) -> void:
 	if not ResourceLoader.exists(path):
@@ -115,7 +149,7 @@ func _on_model_picked(fname: String) -> void:
 
 func _toggle_sidebar() -> void:
 	_sidebar_open = not _sidebar_open
-	var target_x := 0.0 if _sidebar_open else -SIDEBAR_W
+	var target_x := 0.0 if _sidebar_open else -_sidebar_w
 	var tween := create_tween()
 	tween.tween_property(_sidebar, "position:x", target_x, 0.25)
 
@@ -167,11 +201,12 @@ func _setup_ui() -> void:
 	_ui_layer = CanvasLayer.new()
 	add_child(_ui_layer)
 
-	var view := get_viewport().get_visible_rect().size
+	var view: Vector2 = get_viewport().get_visible_rect().size
+	_sidebar_w = clamp(view.x * 0.42, 300.0, 480.0)
 
 	_sidebar = PanelContainer.new()
-	_sidebar.position = Vector2(-SIDEBAR_W, 0)
-	_sidebar.size = Vector2(SIDEBAR_W, view.y)
+	_sidebar.position = Vector2(-_sidebar_w, 0)
+	_sidebar.size = Vector2(_sidebar_w, view.y)
 	_ui_layer.add_child(_sidebar)
 
 	var scroll := ScrollContainer.new()
@@ -184,7 +219,7 @@ func _setup_ui() -> void:
 	scroll.add_child(vbox)
 
 	var spacer := Control.new()
-	spacer.custom_minimum_size = Vector2(0, 80)
+	spacer.custom_minimum_size = Vector2(0, 96)
 	vbox.add_child(spacer)
 
 	var title := Label.new()
@@ -215,7 +250,8 @@ func _setup_ui() -> void:
 	_menu_btn = Button.new()
 	_menu_btn.text = "\u2630"
 	_menu_btn.position = Vector2(16, 16)
-	_menu_btn.size = Vector2(64, 64)
+	_menu_btn.size = Vector2(88, 88)
+	_menu_btn.add_theme_font_size_override("font_size", 42)
 	_menu_btn.pressed.connect(_toggle_sidebar)
 	_ui_layer.add_child(_menu_btn)
 
