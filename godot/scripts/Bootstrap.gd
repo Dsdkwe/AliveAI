@@ -22,13 +22,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		_drag_active = event.pressed
 		_last_touch = event.position
-	elif event is InputEventScreenDrag and _drag_active:
-		var dx := event.position.x - _last_touch.x
-		var dy := event.position.y - _last_touch.y
+		return
+	if event is InputEventScreenDrag and _drag_active:
+		var drag := event as InputEventScreenDrag
 		if _cube:
-			_cube.rotate_y(dx * 0.01)
-			_cube.rotate_x(dy * 0.01)
-		_last_touch = event.position
+			_cube.rotate_y((drag.position.x - _last_touch.x) * 0.01)
+			_cube.rotate_x((drag.position.y - _last_touch.y) * 0.01)
+		_last_touch = drag.position
 
 func _setup_environment() -> void:
 	var we := WorldEnvironment.new()

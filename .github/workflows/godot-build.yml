@@ -39,8 +39,16 @@ jobs:
       - name: Install Godot export templates
         run: |
           curl -fsSL -o templates.tpz "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
-          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
-          unzip -q templates.tpz -d "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          DEST="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$DEST"
+          unzip -q templates.tpz -d /tmp/godot_templates
+          if [ -d /tmp/godot_templates/templates ]; then
+            mv /tmp/godot_templates/templates/* "$DEST/"
+          else
+            mv /tmp/godot_templates/* "$DEST/"
+          fi
+          echo "--- templates installed: ---"
+          ls -1 "$DEST"
 
       - name: Import project (catch script/scene errors early)
         run: ./godot-bin --headless --path godot --import
