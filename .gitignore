@@ -3,3 +3,4 @@
 **/.godot/
 godot/build/
 godot/android/debug.keystore
+.keystore/

@@ -1,54 +1,223 @@
 extends Node3D
 
+# --- 3D ---
 var _avatar: Node3D = null
 var _cube: MeshInstance3D = null
+var _cam: Camera3D = null
+
+# --- UI ---
+var _ui_layer: CanvasLayer = null
+var _menu_btn: Button = null
+var _sidebar: PanelContainer = null
+var _sidebar_open := false
+var _status: Label = null
+var _model_box: VBoxContainer = null
+var _scale_slider: HSlider = null
+var _rot_slider: HSlider = null
+var _dist_slider: HSlider = null
+var _pitch_slider: HSlider = null
+
+# --- 相机参数 ---
+var _cam_distance := 3.0
+var _cam_pitch := 15.0
+var _cam_yaw := 0.0
+
+# --- 触摸 ---
 var _drag_active := false
 var _last_touch := Vector2.ZERO
-var _status: Label = null
+
+const MODEL_DIR := "res://assets/models"
+const SIDEBAR_W := 340.0
 
 func _ready() -> void:
 	_setup_environment()
 	_setup_light()
 	_setup_camera()
-	_status = _setup_hud()
-	_load_vrm()
-
-func _process(delta: float) -> void:
-	if _avatar:
-		_avatar.rotate_y(delta * 0.3)
-	elif _cube:
-		_cube.rotate_y(delta * 0.8)
+	_setup_ui()
+	_load_vrm(MODEL_DIR + "/gwen.vrm")
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		_drag_active = event.pressed
 		_last_touch = event.position
 		return
-	if event is InputEventScreenDrag and _drag_active:
+	if event is InputEventScreenDrag and _drag_active and _avatar:
 		var drag := event as InputEventScreenDrag
-		var target: Node3D = _avatar if _avatar else _cube
-		if target:
-			target.rotate_y((drag.position.x - _last_touch.x) * 0.01)
+		_avatar.rotate_y((drag.position.x - _last_touch.x) * 0.01)
 		_last_touch = drag.position
 
-func _load_vrm() -> void:
-	var vrm_path := "res://assets/models/gwen.vrm"
-	if not ResourceLoader.exists(vrm_path):
-		_show_status("VRM not found -> cube")
+func _load_vrm(path: String) -> void:
+	if not ResourceLoader.exists(path):
+		_show_status("VRM not found: " + path.get_file())
 		_setup_cube()
 		return
-	var packed = load(vrm_path)
+	var packed = load(path)
 	if packed == null:
-		_show_status("VRM load failed -> cube")
+		_show_status("VRM load failed: " + path.get_file())
 		_setup_cube()
 		return
+	if _avatar:
+		_avatar.queue_free()
+		_avatar = null
 	_avatar = packed.instantiate()
 	if _avatar == null:
-		_show_status("VRM instantiate failed -> cube")
+		_show_status("VRM instantiate failed")
 		_setup_cube()
 		return
 	add_child(_avatar)
-	_show_status("VRM loaded: gwen.vrm")
+	_apply_current_transforms()
+	_show_status("VRM loaded: " + path.get_file())
+
+func _apply_current_transforms() -> void:
+	if not _avatar:
+		return
+	if _scale_slider:
+		_avatar.scale = Vector3.ONE * _scale_slider.value
+	if _rot_slider:
+		_avatar.rotation.y = deg_to_rad(_rot_slider.value)
+
+func _list_models() -> Array:
+	var out: Array = []
+	var dir := DirAccess.open(MODEL_DIR)
+	if dir == null:
+		return out
+	dir.list_dir_begin()
+	var f := dir.get_next()
+	while f != "":
+		if f.ends_with(".vrm"):
+			out.append(f)
+		f = dir.get_next()
+	dir.list_dir_end()
+	out.sort()
+	return out
+
+func _refresh_model_list() -> void:
+	if _model_box == null:
+		return
+	for c in _model_box.get_children():
+		c.queue_free()
+	var models := _list_models()
+	if models.is_empty():
+		var empty := Label.new()
+		empty.text = "(no .vrm models)"
+		empty.add_theme_font_size_override("font_size", 16)
+		_model_box.add_child(empty)
+		return
+	for m in models:
+		var b := Button.new()
+		b.text = m
+		b.add_theme_font_size_override("font_size", 15)
+		b.pressed.connect(_on_model_picked.bind(m))
+		_model_box.add_child(b)
+
+func _on_model_picked(fname: String) -> void:
+	_load_vrm(MODEL_DIR + "/" + fname)
+
+func _toggle_sidebar() -> void:
+	_sidebar_open = not _sidebar_open
+	var target_x := 0.0 if _sidebar_open else -SIDEBAR_W
+	var tween := create_tween()
+	tween.tween_property(_sidebar, "position:x", target_x, 0.25)
+
+func _add_slider_row(parent: Control, title: String, min_v: float, max_v: float, step_v: float, init_v: float, cb: Callable) -> HSlider:
+	var lbl := Label.new()
+	lbl.text = title
+	lbl.add_theme_font_size_override("font_size", 18)
+	parent.add_child(lbl)
+	var s := HSlider.new()
+	s.min_value = min_v
+	s.max_value = max_v
+	s.step = step_v
+	s.value = init_v
+	s.value_changed.connect(cb)
+	parent.add_child(s)
+	return s
+
+func _on_scale_changed(v: float) -> void:
+	if _avatar:
+		_avatar.scale = Vector3.ONE * v
+
+func _on_rot_changed(v: float) -> void:
+	if _avatar:
+		_avatar.rotation.y = deg_to_rad(v)
+
+func _on_dist_changed(v: float) -> void:
+	_cam_distance = v
+	_update_camera()
+
+func _on_pitch_changed(v: float) -> void:
+	_cam_pitch = v
+	_update_camera()
+
+func _update_camera() -> void:
+	if not _cam:
+		return
+	var target := Vector3(0.0, 1.0, 0.0)
+	var pitch_rad := deg_to_rad(_cam_pitch)
+	var yaw_rad := deg_to_rad(_cam_yaw)
+	var off := Vector3(
+		_cam_distance * cos(pitch_rad) * sin(yaw_rad),
+		_cam_distance * sin(pitch_rad),
+		_cam_distance * cos(pitch_rad) * cos(yaw_rad)
+	)
+	_cam.position = target + off
+	_cam.look_at(target)
+
+func _setup_ui() -> void:
+	_ui_layer = CanvasLayer.new()
+	add_child(_ui_layer)
+
+	var view := get_viewport().get_visible_rect().size
+
+	_sidebar = PanelContainer.new()
+	_sidebar.position = Vector2(-SIDEBAR_W, 0)
+	_sidebar.size = Vector2(SIDEBAR_W, view.y)
+	_ui_layer.add_child(_sidebar)
+
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_sidebar.add_child(scroll)
+
+	var vbox := VBoxContainer.new()
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_theme_constant_override("separation", 10)
+	scroll.add_child(vbox)
+
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0, 80)
+	vbox.add_child(spacer)
+
+	var title := Label.new()
+	title.text = "Half-hearted AI"
+	title.add_theme_font_size_override("font_size", 28)
+	vbox.add_child(title)
+
+	var mlbl := Label.new()
+	mlbl.text = "-- MODELS --"
+	mlbl.add_theme_font_size_override("font_size", 18)
+	vbox.add_child(mlbl)
+
+	_model_box = VBoxContainer.new()
+	vbox.add_child(_model_box)
+	_refresh_model_list()
+
+	_scale_slider = _add_slider_row(vbox, "Scale", 0.5, 2.0, 0.05, 1.0, _on_scale_changed)
+	_rot_slider = _add_slider_row(vbox, "Rotate", -180.0, 180.0, 5.0, 0.0, _on_rot_changed)
+	_dist_slider = _add_slider_row(vbox, "Camera Distance", 1.0, 8.0, 0.1, _cam_distance, _on_dist_changed)
+	_pitch_slider = _add_slider_row(vbox, "Camera Pitch", -45.0, 75.0, 1.0, _cam_pitch, _on_pitch_changed)
+
+	_status = Label.new()
+	_status.text = "Half-hearted AI | ready"
+	_status.add_theme_font_size_override("font_size", 16)
+	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(_status)
+
+	_menu_btn = Button.new()
+	_menu_btn.text = "\u2630"
+	_menu_btn.position = Vector2(16, 16)
+	_menu_btn.size = Vector2(64, 64)
+	_menu_btn.pressed.connect(_toggle_sidebar)
+	_ui_layer.add_child(_menu_btn)
 
 func _show_status(msg: String) -> void:
 	if _status:
@@ -73,21 +242,9 @@ func _setup_light() -> void:
 	add_child(sun)
 
 func _setup_camera() -> void:
-	var cam := Camera3D.new()
-	cam.position = Vector3(0.0, 1.25, 3.0)
-	cam.look_at(Vector3(0.0, 1.0, 0.0))
-	add_child(cam)
-
-func _setup_hud() -> Label:
-	var layer := CanvasLayer.new()
-	var label := Label.new()
-	label.text = "Half-hearted AI | loading..."
-	label.position = Vector2(24, 24)
-	label.add_theme_font_size_override("font_size", 26)
-	label.add_theme_color_override("font_color", Color.WHITE)
-	layer.add_child(label)
-	add_child(layer)
-	return label
+	_cam = Camera3D.new()
+	add_child(_cam)
+	_update_camera()
 
 func _setup_cube() -> void:
 	_cube = MeshInstance3D.new()

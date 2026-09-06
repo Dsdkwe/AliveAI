@@ -9,7 +9,7 @@ on:
       - '.github/workflows/godot-build.yml'
 
 env:
-  GODOT_VERSION: "4.4.1"   # 以后升级只改这一处
+  GODOT_VERSION: "4.4.1"
 
 jobs:
   build-android:
@@ -53,14 +53,13 @@ jobs:
       - name: Import project (catch script/scene errors early)
         run: ./godot-bin --headless --path godot --import
 
-      - name: Create Android debug keystore
+      - name: Decode signing keystore (fixed, from secret)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
         run: |
           mkdir -p godot/android
-          keytool -genkeypair -v \
-            -keystore godot/android/debug.keystore \
-            -storepass android -keypass android \
-            -alias androiddebugkey -keyalg RSA -keysize 2048 \
-            -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          echo "$KEYSTORE_B64" | base64 -d > godot/android/halfhearted.keystore
+          ls -l godot/android/halfhearted.keystore
 
       - name: Export debug APK
         run: |
