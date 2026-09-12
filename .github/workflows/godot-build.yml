@@ -56,6 +56,12 @@ jobs:
       - name: Import project (catch script/scene errors early)
         run: ./godot-bin --headless --path godot --import
 
+      - name: Accept Android SDK licenses & install platforms
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platforms;android-35" > /dev/null 2>&1 || true
+      - name: Install Android build template + camera plugin
+        run: python3 godot/android_plugin/inject.py
       - name: Decode signing keystore (fixed, from secret)
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
