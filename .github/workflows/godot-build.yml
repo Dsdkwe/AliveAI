@@ -8,6 +8,9 @@ on:
       - 'godot/**'
       - '.github/workflows/godot-build.yml'
 
+permissions:
+  contents: write
+
 env:
   GODOT_VERSION: "4.4.1"
 
@@ -74,3 +77,12 @@ jobs:
           name: halfhearted-debug-apk
           path: godot/build/halfhearted-debug.apk
           if-no-files-found: error
+
+      - name: Publish APK to GitHub Release (for easy phone download)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view apk-latest >/dev/null 2>&1 || \
+            gh release create apk-latest --title "Latest Debug APK" --notes "自动构建产物（main 最新）。直接下载 halfhearted-debug.apk 安装。" --latest
+          gh release upload apk-latest godot/build/halfhearted-debug.apk --clobber
+          echo "APK: https://github.com/${GITHUB_REPOSITORY}/releases/download/apk-latest/halfhearted-debug.apk"
