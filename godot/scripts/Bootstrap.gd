@@ -32,7 +32,7 @@ const SCAN_DIRS := [
 	"/storage/emulated/0/Download/HalfHearted",
 ]
 const SIDEBAR_MIN_W := 520.0
-const SIDEBAR_HANDLE_W := 44.0
+const SIDEBAR_HANDLE_W := 64.0
 const SCAN_AUTO_INTERVAL := 2.5
 
 const EMO_CN := {
@@ -93,6 +93,14 @@ var _toast: Label = null
 var _toast_seq := 0
 var _cur_model_path := ""
 
+# 侧边栏手势路由 / 菜单热区
+var _menu_hotspot: Control = null
+var _sidebar_scroll: ScrollContainer = null
+var _sb_touch_idx := -1
+var _sb_drag_total := Vector2.ZERO
+var _sb_hijack := false
+var _sb_mode := ""
+
 func _ready() -> void:
 	_setup_font()
 	_setup_environment()
@@ -126,6 +134,86 @@ func _process(_delta: float) -> void:
 			_dl_label.text = "下载中… %.1f MB" % (got / 1048576.0)
 	if _sidebar_open:
 		_update_sidebar_handle()
+
+func _on_menu_hotspot_input(event: InputEvent) -> void:
+	if event is InputEventScreenTouch:
+		var t := event as InputEventScreenTouch
+		if t.pressed:
+			_toggle_sidebar()
+	elif event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT and mb.device != InputEvent.DEVICE_ID_EMULATION:
+			_toggle_sidebar()
+
+func _input(event: InputEvent) -> void:
+	# 侧边栏打开时：从面板上开始的拖动 = 纵向滚动 / 向右拉宽；并避免误触按钮
+	if not _sidebar_open or _sidebar == null:
+		return
+	if event is InputEventScreenTouch:
+		var t := event as InputEventScreenTouch
+		if t.pressed:
+			if _sb_touch_idx < 0 and _inside_sidebar(t.position) and not _inside_handle(t.position) and not _inside_interactive(t.position):
+				_sb_touch_idx = t.index
+				_sb_drag_total = Vector2.ZERO
+				_sb_hijack = false
+				_sb_mode = ""
+		elif t.index == _sb_touch_idx:
+			var was_hijack := _sb_hijack
+			_sb_touch_idx = -1
+			_sb_hijack = false
+			if was_hijack:
+				get_viewport().set_input_as_handled()
+		return
+	if event is InputEventScreenDrag:
+		var d := event as InputEventScreenDrag
+		if d.index != _sb_touch_idx or _sb_touch_idx < 0:
+			return
+		_sb_drag_total += d.relative
+		if not _sb_hijack:
+			if _sb_drag_total.length() < 14.0:
+				return
+			if absf(_sb_drag_total.x) > absf(_sb_drag_total.y) * 1.3 and _sb_drag_total.x > 0.0:
+				_sb_mode = "width"
+			else:
+				_sb_mode = "scroll"
+			_sb_hijack = true
+			_release_sidebar_buttons()
+		if _sb_mode == "scroll" and _sidebar_scroll != null:
+			_sidebar_scroll.scroll_vertical -= int(d.relative.y)
+		elif _sb_mode == "width":
+			_set_sidebar_width(_sidebar_w + d.relative.x)
+		get_viewport().set_input_as_handled()
+		return
+	if _sb_hijack and (event is InputEventMouseMotion or event is InputEventMouseButton) and event.device == InputEvent.DEVICE_ID_EMULATION:
+		get_viewport().set_input_as_handled()
+
+func _inside_sidebar(pos: Vector2) -> bool:
+	if _sidebar == null:
+		return false
+	return _sidebar.get_global_rect().has_point(pos)
+
+func _inside_handle(pos: Vector2) -> bool:
+	if _sidebar_handle == null or not _sidebar_handle.visible:
+		return false
+	return _sidebar_handle.get_global_rect().has_point(pos)
+
+func _inside_interactive(pos: Vector2) -> bool:
+	if _sidebar == null:
+		return false
+	for c in _sidebar.find_children("*", "HSlider", true, false):
+		if c is Control and (c as Control).get_global_rect().has_point(pos):
+			return true
+	for c in _sidebar.find_children("*", "LineEdit", true, false):
+		if c is Control and (c as Control).get_global_rect().has_point(pos):
+			return true
+	return false
+
+func _release_sidebar_buttons() -> void:
+	if _sidebar == null:
+		return
+	for b in _sidebar.find_children("*", "BaseButton", true, false):
+		if b is BaseButton:
+			(b as BaseButton).set_pressed_no_signal(false)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
@@ -668,6 +756,12 @@ func _toggle_sidebar() -> void:
 	var target_x := 0.0 if _sidebar_open else -_sidebar_w
 	var tween := create_tween()
 	tween.tween_property(_sidebar, "position:x", target_x, 0.25)
+	if _menu_hotspot:
+		_menu_hotspot.mouse_filter = (Control.MOUSE_FILTER_IGNORE if _sidebar_open else Control.MOUSE_FILTER_STOP)
+	if _menu_btn:
+		_menu_btn.visible = not _sidebar_open
+	_sb_touch_idx = -1
+	_sb_hijack = false
 	_update_sidebar_handle()
 	if _sidebar_open:
 		_refresh_folder_models()
@@ -710,7 +804,7 @@ func _update_sidebar_handle() -> void:
 		_sidebar_handle.position = Vector2(_sidebar.position.x + _sidebar.size.x - SIDEBAR_HANDLE_W * 0.5, 0)
 		var view: Vector2 = get_viewport().get_visible_rect().size
 		if _sidebar_handle_bar:
-			_sidebar_handle_bar.position = Vector2((SIDEBAR_HANDLE_W - 10.0) * 0.5, view.y * 0.5 - 110.0)
+			_sidebar_handle_bar.position = Vector2((SIDEBAR_HANDLE_W - 12.0) * 0.5, view.y * 0.5 - 120.0)
 
 func _save_sidebar_width() -> void:
 	var cfg := {}
@@ -1005,6 +1099,20 @@ func _setup_ui() -> void:
 	_sidebar = PanelContainer.new()
 	_sidebar.position = Vector2(-_sidebar_w, 0)
 	_sidebar.size = Vector2(_sidebar_w, view.y)
+	var panel_sd := StyleBoxFlat.new()
+	panel_sd.bg_color = Color(0.045, 0.052, 0.075, 0.97)
+	panel_sd.corner_radius_top_right = 28
+	panel_sd.corner_radius_bottom_right = 28
+	panel_sd.border_width_right = 2
+	panel_sd.border_color = Color(1.0, 1.0, 1.0, 0.10)
+	panel_sd.shadow_color = Color(0, 0, 0, 0.55)
+	panel_sd.shadow_size = 24
+	panel_sd.shadow_offset = Vector2(8, 0)
+	panel_sd.content_margin_left = 16
+	panel_sd.content_margin_right = 44
+	panel_sd.content_margin_top = 12
+	panel_sd.content_margin_bottom = 12
+	_sidebar.add_theme_stylebox_override("panel", panel_sd)
 	_ui_layer.add_child(_sidebar)
 
 	# ---- 侧边栏宽度拖拽手柄（右缘，向右拖加宽 / 向左拖收窄） ----
@@ -1016,28 +1124,39 @@ func _setup_ui() -> void:
 	_sidebar_handle.gui_input.connect(_on_sidebar_handle_input)
 	_ui_layer.add_child(_sidebar_handle)
 	_sidebar_handle_bar = ColorRect.new()
-	_sidebar_handle_bar.color = Color(1.0, 1.0, 1.0, 0.22)
+	_sidebar_handle_bar.color = Color(1.0, 1.0, 1.0, 0.30)
 	_sidebar_handle_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_sidebar_handle_bar.size = Vector2(10, 220)
+	_sidebar_handle_bar.size = Vector2(12, 240)
 	_sidebar_handle.add_child(_sidebar_handle_bar)
 
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_sidebar.add_child(scroll)
+	_sidebar_scroll = ScrollContainer.new()
+	_sidebar_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_sidebar.add_child(_sidebar_scroll)
 
 	var vbox := VBoxContainer.new()
 	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.add_theme_constant_override("separation", 20)
-	scroll.add_child(vbox)
+	_sidebar_scroll.add_child(vbox)
 
 	var spacer := Control.new()
 	spacer.custom_minimum_size = Vector2(0, 184)
 	vbox.add_child(spacer)
 
+	var title_row := HBoxContainer.new()
+	vbox.add_child(title_row)
 	var title := Label.new()
 	title.text = "Half-hearted AI"
 	title.add_theme_font_size_override("font_size", 64)
-	vbox.add_child(title)
+	title_row.add_child(title)
+	var title_spacer := Control.new()
+	title_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_row.add_child(title_spacer)
+	var close_btn := Button.new()
+	close_btn.text = "\u2715"
+	close_btn.add_theme_font_size_override("font_size", 54)
+	close_btn.custom_minimum_size = Vector2(96, 96)
+	close_btn.pressed.connect(_toggle_sidebar)
+	title_row.add_child(close_btn)
 
 	# ---- 角色模型 ----
 	var mlbl := Label.new()
@@ -1192,14 +1311,36 @@ func _setup_ui() -> void:
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vbox.add_child(_status)
 
-	# ---- 菜单按钮 ----
+	# ---- 菜单按钮（左上角大热区：防止边缘误差导致点不到） ----
+	_menu_hotspot = Control.new()
+	_menu_hotspot.position = Vector2.ZERO
+	_menu_hotspot.size = Vector2(360, 380)
+	_menu_hotspot.mouse_filter = Control.MOUSE_FILTER_STOP
+	_menu_hotspot.gui_input.connect(_on_menu_hotspot_input)
+	_ui_layer.add_child(_menu_hotspot)
+
 	_menu_btn = Button.new()
 	_menu_btn.text = "\u2630"
-	_menu_btn.position = Vector2(20, 20)
-	_menu_btn.size = Vector2(140, 140)
-	_menu_btn.add_theme_font_size_override("font_size", 88)
+	_menu_btn.position = Vector2(34, 176)
+	_menu_btn.size = Vector2(152, 152)
+	_menu_btn.add_theme_font_size_override("font_size", 92)
+	var mb_normal := StyleBoxFlat.new()
+	mb_normal.bg_color = Color(0.06, 0.07, 0.11, 0.78)
+	mb_normal.set_corner_radius_all(38)
+	mb_normal.border_width_left = 2
+	mb_normal.border_width_top = 2
+	mb_normal.border_width_right = 2
+	mb_normal.border_width_bottom = 2
+	mb_normal.border_color = Color(1.0, 1.0, 1.0, 0.14)
+	var mb_hover := mb_normal.duplicate() as StyleBoxFlat
+	mb_hover.bg_color = Color(0.10, 0.12, 0.18, 0.85)
+	var mb_pressed := mb_normal.duplicate() as StyleBoxFlat
+	mb_pressed.bg_color = Color(0.16, 0.19, 0.28, 0.90)
+	_menu_btn.add_theme_stylebox_override("normal", mb_normal)
+	_menu_btn.add_theme_stylebox_override("hover", mb_hover)
+	_menu_btn.add_theme_stylebox_override("pressed", mb_pressed)
 	_menu_btn.pressed.connect(_toggle_sidebar)
-	_ui_layer.add_child(_menu_btn)
+	_menu_hotspot.add_child(_menu_btn)
 
 	# ---- 顶部提示条（重要消息直接显示在画面顶部）----
 	_toast = Label.new()
@@ -1250,6 +1391,12 @@ func _setup_light() -> void:
 	sun.rotation_degrees = Vector3(-50.0, -30.0, 0.0)
 	sun.light_energy = 1.4
 	sun.shadow_enabled = true
+	# 阴影调优：减少腿部自阴影条纹、锯齿与转动时的轻微闪烁
+	sun.shadow_bias = 0.04
+	sun.shadow_normal_bias = 1.6
+	sun.shadow_blur = 1.6
+	sun.directional_shadow_max_distance = 24.0
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	add_child(sun)
 
 func _setup_camera() -> void:

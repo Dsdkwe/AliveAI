@@ -50,6 +50,17 @@ const HEAD_SHAKE := [Vector3(0, 20, 0), Vector3(0, -20, 0), Vector3(0, 15, 0), V
 const HEAD_TILT := [Vector3(0, 0, 20), Vector3.ZERO]
 const ACTION_STEP_TIME := 0.24
 
+# 自然站姿（手臂下垂）：[骨骼名, 世界空间绕 Z 轴旋转角度(度)]，左负右正。
+# 通过「父骨骼全局逆 × 世界旋转 × 父骨骼全局」换算到骨骼局部空间，任意模型通用。
+const ARM_POSE_DEFS := [
+	["LeftUpperArm", -62.0],
+	["RightUpperArm", 62.0],
+	["LeftLowerArm", -16.0],
+	["RightLowerArm", 16.0],
+]
+const ARM_POSE_TIME := 0.9
+const ARM_POSE_DELAY := 0.55
+
 var _avatar: Node3D = null
 var _skel: Skeleton3D = null
 var _meshes: Array = []
@@ -91,6 +102,11 @@ var _blink_next := 2.5
 var _blink_time := -1.0
 var _blink_queue := 0
 
+var _arm_bones := []
+var _arm_t := 0.0
+var _arm_delay := 0.0
+var _arm_done := false
+
 func setup(avatar: Node3D) -> void:
 	_avatar = avatar
 	if _avatar == null:
@@ -114,9 +130,10 @@ func setup(avatar: Node3D) -> void:
 	_read_look_poses()
 	_setup_blink()
 	_setup_talk_shapes()
+	_setup_arm_pose()
 	print("[AvatarController] skel=", _skel != null, " head=", _head_idx, " jaw=", _jaw_idx,
 		" eyes=", _eye_l_idx, "/", _eye_r_idx, " meshes=", _meshes.size(),
-		" blink=", not _blink.is_empty(), " look_deltas=", _look_deltas.size())
+		" blink=", not _blink.is_empty(), " look_deltas=", _look_deltas.size(), " arms=", _arm_bones.size())
 
 func get_emotion() -> String:
 	return _emotion
@@ -158,6 +175,43 @@ func _process(delta: float) -> void:
 	_tick_head(delta)
 	_tick_eyes(delta)
 	_tick_shapes(delta)
+	_tick_pose(delta)
+
+# ---------------------------------------------------------------- 自然站姿
+
+func _setup_arm_pose() -> void:
+	_arm_bones.clear()
+	_arm_t = 0.0
+	_arm_delay = ARM_POSE_DELAY
+	_arm_done = false
+	if _skel == null:
+		return
+	for d in ARM_POSE_DEFS:
+		var bi := _skel.find_bone(str(d[0]))
+		if bi >= 0 and _skel.get_bone_parent(bi) >= 0:
+			_arm_bones.append({"idx": bi, "parent": _skel.get_bone_parent(bi), "deg": float(d[1])})
+
+func _tick_pose(delta: float) -> void:
+	if _arm_done or _skel == null or _arm_bones.is_empty():
+		return
+	_arm_delay -= delta
+	if _arm_delay > 0.0:
+		return
+	_arm_t = minf(1.0, _arm_t + delta / ARM_POSE_TIME)
+	var e: float = _arm_t * _arm_t * (3.0 - 2.0 * _arm_t)
+	_apply_arm_drop(e)
+	if _arm_t >= 1.0:
+		_arm_done = true
+
+func _apply_arm_drop(t: float) -> void:
+	for d in _arm_bones:
+		var idx: int = d["idx"]
+		var par: int = d["parent"]
+		var gp := _skel.get_bone_global_pose(par).basis
+		var w := Basis(Vector3(0, 0, 1), deg_to_rad(float(d["deg"]) * t))
+		var c := gp.inverse() * w * gp
+		var lb := _skel.get_bone_rest(idx).basis
+		_skel.set_bone_pose_rotation(idx, (c * lb).get_rotation_quaternion())
 
 # ---------------------------------------------------------------- blink
 
