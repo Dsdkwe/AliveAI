@@ -103,6 +103,12 @@ func setup(avatar: Node3D) -> void:
 	if _skel:
 		_head_idx = _find_bone(_skel, "Head")
 		_jaw_idx = _find_bone(_skel, "Jaw")
+		if _jaw_idx < 0:
+			# 兜底：按后缀找 jaw（兼容不同命名的 VRM0 骨骼）
+			for i in range(_skel.get_bone_count()):
+				if String(_skel.get_bone_name(i)).to_lower().ends_with("jaw"):
+					_jaw_idx = i
+					break
 		_eye_l_idx = _find_bone(_skel, "LeftEye")
 		_eye_r_idx = _find_bone(_skel, "RightEye")
 	_read_look_poses()
@@ -177,7 +183,11 @@ func _tick_blink(delta: float) -> void:
 				_blink_time = 0.0
 			else:
 				_blink_next = randf_range(2.5, 5.5)
-		_set_direct(_blink, v * 0.9)
+		if not _blink.is_empty():
+			_set_direct(_blink, v * 0.9)
+		else:
+			_set_direct(_blink_l, v * 0.9)
+			_set_direct(_blink_r, v * 0.9)
 
 # ---------------------------------------------------------------- mouth
 
@@ -297,9 +307,9 @@ func _set_direct(d: Dictionary, v: float) -> void:
 # ---------------------------------------------------------------- lookup
 
 func _setup_blink() -> void:
-	_blink = _find_shape(["blink", "eye_close", "fcl_eye_close"])
-	_blink_l = _find_shape(["blinkleft", "blink_left", "eye_close_l", "fcl_eye_close_l"])
-	_blink_r = _find_shape(["blinkright", "blink_right", "eye_close_r", "fcl_eye_close_r"])
+	_blink = _find_shape(["blink", "eye_close", "fcl_eye_close", "闭眼", "眨眼"])
+	_blink_l = _find_shape(["blinkleft", "blink_left", "eye_close_l", "fcl_eye_close_l", "左眼闭", "左闭眼"])
+	_blink_r = _find_shape(["blinkright", "blink_right", "eye_close_r", "fcl_eye_close_r", "右眼闭", "右闭眼"])
 	# 通用 morph_N 命名兜底（gwen.vrm：0=blink, 1=blinkLeft, 2=blinkRight）
 	if _blink.is_empty():
 		for mi in _meshes:
@@ -313,9 +323,14 @@ func _setup_blink() -> void:
 				if _blink_r.is_empty():
 					_blink_r = {"mi": mi, "idx": 2}
 				break
+	# 若主眨眼只匹配到单眼（如 furina 的 vrc.blink_left），改为左右眼同步驱动
+	if not _blink.is_empty() and not _blink_l.is_empty() and not _blink_r.is_empty():
+		if _same_shape(_blink, _blink_l) or _same_shape(_blink, _blink_r):
+			_blink = {}
 
 func _setup_talk_shapes() -> void:
-	_talk_open = _find_shape(["aa", "mouthopen", "fcl_mth_a", "jawopen"])
+	# 口型优先：VRM0 标准 A 口 / 中文模型常见 "a"；再退到英文命名
+	_talk_open = _find_shape(["aa", "a", "fcl_mth_a", "mouthopen", "jawopen"])
 
 func _read_look_poses() -> void:
 	if _anim == null:
@@ -366,6 +381,11 @@ func _find_shape(cands: Array) -> Dictionary:
 				if cs.length() >= 4 and n2.find(cs) >= 0:
 					return {"mi": mi, "idx": i}
 	return {}
+
+func _same_shape(a: Dictionary, b: Dictionary) -> bool:
+	if a.is_empty() or b.is_empty():
+		return false
+	return a["mi"] == b["mi"] and int(a["idx"]) == int(b["idx"])
 
 func _collect_meshes(n: Node) -> void:
 	if n is MeshInstance3D:

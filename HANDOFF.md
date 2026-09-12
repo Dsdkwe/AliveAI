@@ -2,7 +2,7 @@
 
 ## 一句话
 安卓 AI 语音助手/虚拟陪伴。最终愿景：AR 摄像头透视 3D 角色（VRM）。
-当前阶段：**第四轮已完成**（上传修复：全类型可选+扩展名校验+顶部 toast；新增「文件夹导入」扫描；权限诊断引导）。
+当前阶段：**第五轮已完成**（侧边栏可拖拽加宽；扫描改「被动自动识别」只认 Download/HalfHearted/；VRM0 眨眼/口型语义适配；打通远程截图诊断链路）。
 
 ## 已定死的技术决策
 - 客户端引擎：Godot 4.4.1（已放弃 Unity：个人版许可证无法在无桌面机环境激活，这是硬限制）
@@ -42,6 +42,9 @@
 18. **上传修复 + 顶部提示条**：选择器过滤器改 `["*;所有文件;*"]`（Kotlin 侧退化为 `*/*`，全类型可选）；选择后校验扩展名；所有消息同步显示在画面顶部 toast（原来只在侧边栏底部，用户看不到）✅
 19. **文件夹导入（换模型推荐通道）**：侧边栏「文件夹导入」区 —— 扫描 `Download/HalfHearted/`、`Download/`、`Android/data/com.hta.halfhearted/files/import/` 里的 .vrm/.zip → 点文件名导入；自动建目录；失败含权限引导 ✅
 20. **权限答疑**：manifest 已含 `MANAGE_EXTERNAL_STORAGE`（系统设置里叫「所有文件访问/所有文件管理」）+ `READ_EXTERNAL_STORAGE`；用户开启后上传与扫描均可读共享存储 ✅
+21. **侧边栏宽度拖拽**：侧边栏右缘手柄（44px 触控条），向右拖加宽 / 向左收窄（范围 520px~屏幕 94%），松手写入 `settings_app.json` 的 `sidebar_w` 持久化 ✅
+22. **文件夹「被动自动识别」**：修复"扫描到 Download 根目录无关压缩包"；只认 `Download/HalfHearted/`；不再有扫描按钮，触发点 = 打开侧边栏 / App 回前台（NOTIFICATION_APPLICATION_FOCUS_IN）/ 侧边栏可见时每 2.5s 自动刷新（签名去重防闪）✅
+23. **VRM0 眨眼/口型适配**：眨眼候选名增补中文（闭眼/左眼闭/右眼闭/眨眼）；口型候选增补 `a`/`aa`（VRM0 标准 A 口）；jaw 骨骼按后缀兜底；主眨眼误匹配单眼（如 furina 的 vrc.blink_left）时自动改左右眼同驱 —— 探针验证 elena/furina/mita 眨眼与口型全部命中 ✅
 
 ## 下一步（阶段 2：角色生动化，按优先级）
 1. **换更完整的 VRM 模型**：已支持 App 内上传/下载/切换（见已完成 11-19；推荐「文件夹导入」）；gwen.vrm 只有 3 个 morph（眨眼），可换带表情/口型形态键的模型（AvatarController 自动匹配候选名）
@@ -68,4 +71,7 @@
 - **Android 文件选择器坑**：仅 Android 10+；SDK<10 或 activity 为空时静默无回调；返回的是磁盘路径而非 URI，Android 11+ 无「所有文件访问」时 FileAccess 读不了（godot#112136）；部分系统「下载」提供器无法转路径 → 回调 ok=false（与取消不可区分）；过滤器一旦含非 octet-stream 类型（如 application/zip），.vrm 可能不可选 —— 用 `["*;所有文件;*"]` 强制 `*/*`。**换模型最稳通道 =「文件夹导入」扫描**
 - **重要反馈必须走顶部 toast**：侧边栏是长滚动列表，底部 `_status` 用户看不到；`_show_status` 已联动顶部提示条，新功能用 `_notify(msg, true)` 保证可见
 - 运行时加载 gwen 会打 3 条 "Morph target bind is null" 警告（addon 已知 FIXME），不影响功能
+- **远程截图诊断工具链（第五轮打通，强烈推荐）**：①`daily_life:take_screenshot` 截图（Operit 实现，Shizuku 掉线也能用）；②看画面：`/tmp/ascii.py`（灰度）/ `/tmp/ascii2.py`（颜色分类，o=皮肤 ~=蓝），用法 `python3 /tmp/ascii.py 图.png 列数`；③屏幕文本：`read_file`（android 环境自带 OCR，直接读 /sdcard/*.png）；④UI 操作/读屏：`Automatic_ui_base`（app_launch / tap / swipe / get_page_info / get_page_screenshot_image）。**注意**：Ubuntu 里的 `su` 是 proot 假根（碰不到 Android 系统），Android 侧操作走 Shizuku 或上述 Operit 包
+- **蒙皮探针正确公式（做过校准，勿用错）**：顶点 `ARRAY_BONES` 是 **skin-bind 索引**，不是骨骼索引；正确顶点世界位置 = `Σ w * (bone_global_rest(skin.get_bind_bone(j)) * skin.get_bind_pose(j)) * v`（gwen 校验：手部簇 dist≈0.04、AABB 高度≈1.6m）。三自装模型（依蕾娜/furina/mita）四层探针全过：手/脚皮肤簇紧贴骨骼（dist≤0.05m）、零权重顶点=0、绑定姿态 dev=0 —— **静态层面无"手腿"缺陷**
+- **用户反馈「手腿异常」悬案（第五轮）**：静态证据全清白（见上条）；怀疑方向 = T-pose 观感 / 材质描边观感 / 运行时状态。已具备截图复核能力，待用户指出具体现象或提供问题截图后再修
 - `user://*.vrm` 用 `VrmLoader.load_vrm()` 加载；`res://` 已导入模型直接 `load()` 拿 PackedScene

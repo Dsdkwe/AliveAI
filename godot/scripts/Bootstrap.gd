@@ -30,9 +30,10 @@ const APP_SETTINGS_PATH := "user://settings_app.json"
 const FONT_PATH := "res://assets/fonts/SmileySans-Oblique.ttf"
 const SCAN_DIRS := [
 	"/storage/emulated/0/Download/HalfHearted",
-	"/storage/emulated/0/Download",
-	"/storage/emulated/0/Android/data/com.hta.halfhearted/files/import",
 ]
+const SIDEBAR_MIN_W := 520.0
+const SIDEBAR_HANDLE_W := 44.0
+const SCAN_AUTO_INTERVAL := 2.5
 
 const EMO_CN := {
 	"neutral": "平静",
@@ -80,9 +81,14 @@ var _downloading := false
 var _dl_final := ""
 var _up_btn: Button = null
 var _up_busy := false
-var _scan_btn: Button = null
 var _scan_box: VBoxContainer = null
 var _scan_dirs_override: Array = []
+var _sidebar_handle: Control = null
+var _sidebar_handle_bar: ColorRect = null
+var _sidebar_dragging := false
+var _scan_timer: Timer = null
+var _last_scan_sig := ""
+var _storage_warned := false
 var _toast: Label = null
 var _toast_seq := 0
 var _cur_model_path := ""
@@ -94,10 +100,21 @@ func _ready() -> void:
 	_setup_camera()
 	_setup_ai()
 	_setup_ui()
+	_scan_timer = Timer.new()
+	_scan_timer.wait_time = SCAN_AUTO_INTERVAL
+	_scan_timer.autostart = true
+	_scan_timer.timeout.connect(_on_scan_timer)
+	add_child(_scan_timer)
 	var start_model := _load_last_model()
 	if start_model == "":
 		start_model = MODEL_DIR + "/gwen.vrm"
 	_load_vrm(start_model)
+
+func _notification(what: int) -> void:
+	# 回到前台时自动刷新「文件夹自动识别」列表
+	if what == NOTIFICATION_APPLICATION_FOCUS_IN:
+		if _scan_box != null:
+			_refresh_folder_models()
 
 func _process(_delta: float) -> void:
 	if _downloading and _dl_http and _dl_label:
@@ -107,6 +124,8 @@ func _process(_delta: float) -> void:
 			_dl_label.text = "下载中 %d%%（%.1f / %.1f MB）" % [int(got * 100 / total), got / 1048576.0, total / 1048576.0]
 		else:
 			_dl_label.text = "下载中… %.1f MB" % (got / 1048576.0)
+	if _sidebar_open:
+		_update_sidebar_handle()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
@@ -242,7 +261,7 @@ func _refresh_model_list() -> void:
 	var models := _gather_models()
 	if models.is_empty():
 		var empty := Label.new()
-		empty.text = "（暂无模型，可用下方「文件夹导入」）"
+		empty.text = "（暂无自装模型；把 vrm/zip 放进 Download/HalfHearted/ 会自动出现）"
 		empty.add_theme_font_size_override("font_size", 46)
 		_model_box.add_child(empty)
 		return
@@ -321,19 +340,19 @@ func _on_upload_pressed() -> void:
 		return
 	var err := DisplayServer.file_dialog_show("选择模型文件", "", "", false, DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, ["*;所有文件;*"], _on_file_picked)
 	if err != OK:
-		_notify("无法打开文件选择器（错误码 %d）。可改用「文件夹导入」" % err, true)
+		_notify("无法打开文件选择器（错误码 %d）。可把模型复制到 Download/HalfHearted/ 自动识别" % err, true)
 		return
 	_up_busy = true
 	_show_status("已打开文件选择器，请选择 .vrm 或 .zip …")
 	await get_tree().create_timer(15.0).timeout
 	if _up_busy:
 		_up_busy = false
-		_notify("未收到选择结果。若选了文件没反应：请改用「文件夹导入」（复制到 Download/HalfHearted/ 后扫描）", true)
+		_notify("未收到选择结果。若选了文件没反应：请把模型复制到 Download/HalfHearted/（自动识别）", true)
 
 func _on_file_picked(ok: bool, paths: PackedStringArray, _filter_index: int) -> void:
 	_up_busy = false
 	if not ok or paths.is_empty():
-		_notify("没有收到文件（取消，或系统未返回路径）。若选了文件没反应，请改用「文件夹导入」", true)
+		_notify("没有收到文件（取消，或系统未返回路径）。若选了文件没反应，请把模型复制到 Download/HalfHearted/", true)
 		return
 	var src := str(paths[0])
 	var low := src.to_lower()
@@ -426,20 +445,39 @@ func _scan_dirs() -> Array:
 		return _scan_dirs_override
 	return SCAN_DIRS.duplicate()
 
-func _on_scan_pressed() -> void:
-	if _scan_box == null:
+func _on_scan_timer() -> void:
+	if _sidebar_open:
+		_refresh_folder_models()
+
+func _refresh_folder_models(show_hint: bool = false) -> void:
+	# 被动自动识别：只认指定文件夹（Download/HalfHearted）；
+	# 触发点：打开侧边栏 / 回到前台 / 侧边栏可见时定时刷新。
+	if _scan_box == null or not is_inside_tree():
 		return
-	for c in _scan_box.get_children():
-		_scan_box.remove_child(c)
-		c.queue_free()
 	_ensure_scan_dirs()
 	var probe := DirAccess.open("/storage/emulated/0/Download")
 	var found: Array = _find_model_files(_scan_dirs())
+	var sig := ("denied" if probe == null else "ok") + "|"
+	for m in found:
+		sig += str(m["path"]) + "|" + str(int(m["mtime"])) + "\n"
+	if sig == _last_scan_sig and not show_hint:
+		return
+	_last_scan_sig = sig
+	for c in _scan_box.get_children():
+		_scan_box.remove_child(c)
+		c.queue_free()
 	if found.is_empty():
+		var hint := Label.new()
+		hint.add_theme_font_size_override("font_size", 40)
+		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		if probe == null:
-			_notify("读取不了手机存储：请到系统设置→应用→Half-hearted AI 开启「所有文件访问/所有文件管理」；也可把模型放到 Android/data/com.hta.halfhearted/files/import/ 再扫描", true)
+			hint.text = "读取不了手机存储：请到系统设置→应用→Half-hearted AI 开启「所有文件访问/所有文件管理」"
+			if not _storage_warned:
+				_storage_warned = true
+				_notify(hint.text, true)
 		else:
-			_notify("没找到 .vrm / .zip。把模型复制到：内部存储/Download/HalfHearted/ 后重试", true)
+			hint.text = "（自动识别）把 .vrm / .zip 放进 Download/HalfHearted/ 就会自动出现"
+		_scan_box.add_child(hint)
 		return
 	var shown := 0
 	for m in found:
@@ -452,7 +490,8 @@ func _on_scan_pressed() -> void:
 		more.text = "……还有 %d 个未显示" % (found.size() - shown)
 		more.add_theme_font_size_override("font_size", 40)
 		_scan_box.add_child(more)
-	_notify("找到 %d 个模型文件，点文件名即可导入" % found.size(), true)
+	if show_hint:
+		_notify("找到 %d 个模型文件，点文件名即可导入" % found.size(), true)
 
 func _ensure_scan_dirs() -> void:
 	for d in _scan_dirs():
@@ -627,6 +666,76 @@ func _toggle_sidebar() -> void:
 	var target_x := 0.0 if _sidebar_open else -_sidebar_w
 	var tween := create_tween()
 	tween.tween_property(_sidebar, "position:x", target_x, 0.25)
+	_update_sidebar_handle()
+	if _sidebar_open:
+		_refresh_folder_models()
+
+# ---------------------------------------------------------------- 侧边栏拖拽
+
+func _on_sidebar_handle_input(event: InputEvent) -> void:
+	if event is InputEventScreenDrag:
+		_set_sidebar_width(_sidebar_w + (event as InputEventScreenDrag).relative.x)
+	elif event is InputEventMouseMotion:
+		var mm := event as InputEventMouseMotion
+		if mm.button_mask & MOUSE_BUTTON_MASK_LEFT:
+			_set_sidebar_width(_sidebar_w + mm.relative.x)
+	elif event is InputEventScreenTouch:
+		if not (event as InputEventScreenTouch).pressed:
+			_finish_sidebar_drag()
+	elif event is InputEventMouseButton:
+		if not (event as InputEventMouseButton).pressed:
+			_finish_sidebar_drag()
+
+func _set_sidebar_width(w: float) -> void:
+	var view: Vector2 = get_viewport().get_visible_rect().size
+	_sidebar_w = clampf(w, SIDEBAR_MIN_W, maxf(view.x * 0.94, SIDEBAR_MIN_W))
+	if _sidebar:
+		_sidebar.size = Vector2(_sidebar_w, view.y)
+		_sidebar.position.x = 0.0 if _sidebar_open else -_sidebar_w
+	_sidebar_dragging = true
+	_update_sidebar_handle()
+
+func _finish_sidebar_drag() -> void:
+	if _sidebar_dragging:
+		_sidebar_dragging = false
+		_save_sidebar_width()
+
+func _update_sidebar_handle() -> void:
+	if _sidebar_handle == null or _sidebar == null:
+		return
+	_sidebar_handle.visible = _sidebar_open
+	if _sidebar_open:
+		_sidebar_handle.position = Vector2(_sidebar.position.x + _sidebar.size.x - SIDEBAR_HANDLE_W * 0.5, 0)
+		var view: Vector2 = get_viewport().get_visible_rect().size
+		if _sidebar_handle_bar:
+			_sidebar_handle_bar.position = Vector2((SIDEBAR_HANDLE_W - 10.0) * 0.5, view.y * 0.5 - 110.0)
+
+func _save_sidebar_width() -> void:
+	var cfg := {}
+	if FileAccess.file_exists(APP_SETTINGS_PATH):
+		var f := FileAccess.open(APP_SETTINGS_PATH, FileAccess.READ)
+		if f != null:
+			var d = JSON.parse_string(f.get_as_text())
+			f.close()
+			if d is Dictionary:
+				cfg = d
+	cfg["sidebar_w"] = _sidebar_w
+	var w := FileAccess.open(APP_SETTINGS_PATH, FileAccess.WRITE)
+	if w != null:
+		w.store_string(JSON.stringify(cfg, " "))
+		w.close()
+
+func _load_sidebar_width() -> float:
+	if not FileAccess.file_exists(APP_SETTINGS_PATH):
+		return 0.0
+	var f := FileAccess.open(APP_SETTINGS_PATH, FileAccess.READ)
+	if f == null:
+		return 0.0
+	var d = JSON.parse_string(f.get_as_text())
+	f.close()
+	if d is Dictionary:
+		return float(d.get("sidebar_w", 0.0))
+	return 0.0
 
 func _add_slider_row(parent: Control, title: String, min_v: float, max_v: float, step_v: float, init_v: float, cb: Callable) -> HSlider:
 	var lbl := Label.new()
@@ -818,6 +927,9 @@ func _setup_ui() -> void:
 
 	var view: Vector2 = get_viewport().get_visible_rect().size
 	_sidebar_w = clamp(view.x * 0.52, 560.0, 760.0)
+	var sw_saved := _load_sidebar_width()
+	if sw_saved > 0.0:
+		_sidebar_w = clampf(sw_saved, SIDEBAR_MIN_W, maxf(view.x * 0.94, SIDEBAR_MIN_W))
 
 	# ---- 聊天面板（底部）----
 	var panel_sb := StyleBoxFlat.new()
@@ -893,6 +1005,20 @@ func _setup_ui() -> void:
 	_sidebar.size = Vector2(_sidebar_w, view.y)
 	_ui_layer.add_child(_sidebar)
 
+	# ---- 侧边栏宽度拖拽手柄（右缘，向右拖加宽 / 向左拖收窄） ----
+	_sidebar_handle = Control.new()
+	_sidebar_handle.mouse_filter = Control.MOUSE_FILTER_STOP
+	_sidebar_handle.mouse_default_cursor_shape = Control.CURSOR_HSIZE
+	_sidebar_handle.size = Vector2(SIDEBAR_HANDLE_W, view.y)
+	_sidebar_handle.visible = false
+	_sidebar_handle.gui_input.connect(_on_sidebar_handle_input)
+	_ui_layer.add_child(_sidebar_handle)
+	_sidebar_handle_bar = ColorRect.new()
+	_sidebar_handle_bar.color = Color(1.0, 1.0, 1.0, 0.22)
+	_sidebar_handle_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_sidebar_handle_bar.size = Vector2(10, 220)
+	_sidebar_handle.add_child(_sidebar_handle_bar)
+
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_sidebar.add_child(scroll)
@@ -933,25 +1059,20 @@ func _setup_ui() -> void:
 	_up_btn.custom_minimum_size = Vector2(0, 128)
 	_up_btn.pressed.connect(_on_upload_pressed)
 	vbox.add_child(_up_btn)
-	# ---- 文件夹导入 ----
+	# ---- 文件夹自动识别 ----
 	var scan_lbl := Label.new()
-	scan_lbl.text = "文件夹导入（推荐）"
+	scan_lbl.text = "文件夹自动识别"
 	scan_lbl.add_theme_font_size_override("font_size", 50)
 	vbox.add_child(scan_lbl)
 	var scan_tip := Label.new()
-	scan_tip.text = "把 .vrm / .zip 复制到手机文件夹：\n内部存储/Download/HalfHearted/\n然后点下面按钮扫描导入"
+	scan_tip.text = "把 .vrm / .zip 复制到手机文件夹：\n内部存储/Download/HalfHearted/\n放进去就会自动出现在这里"
 	scan_tip.add_theme_font_size_override("font_size", 40)
 	scan_tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vbox.add_child(scan_tip)
-	_scan_btn = Button.new()
-	_scan_btn.text = "扫描文件夹里的模型"
-	_scan_btn.add_theme_font_size_override("font_size", 52)
-	_scan_btn.custom_minimum_size = Vector2(0, 128)
-	_scan_btn.pressed.connect(_on_scan_pressed)
-	vbox.add_child(_scan_btn)
 	_scan_box = VBoxContainer.new()
 	_scan_box.add_theme_constant_override("separation", 12)
 	vbox.add_child(_scan_box)
+	_refresh_folder_models()
 	var act_lbl := Label.new()
 	act_lbl.text = "动作测试"
 	act_lbl.add_theme_font_size_override("font_size", 50)
@@ -1104,7 +1225,7 @@ func _setup_ui() -> void:
 	if _brain and _brain.configured():
 		_chat_append("系统", "720已就绪，说点什么吧", "#9fd0ff")
 	else:
-		_chat_append("系统", "欢迎使用！先点左上角 ☰，在「AI 设置」里填入 DeepSeek 密钥，然后就可以对话了。想换模型？把模型复制到 Download/HalfHearted/ 后用「文件夹导入」扫描即可。", "#9fd0ff")
+		_chat_append("系统", "欢迎使用！先点左上角 ☰，在「AI 设置」里填入 DeepSeek 密钥，然后就可以对话了。想换模型？把模型复制到 Download/HalfHearted/ 会自动识别，也可以点「从手机选择」。", "#9fd0ff")
 
 func _show_status(msg: String) -> void:
 	if _status:
