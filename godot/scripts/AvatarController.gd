@@ -26,12 +26,12 @@ const SHAPE_CANDIDATES := {
 # 情绪 -> 头部姿态偏移（度）：x=低头(+)/抬头(-)，y=左转(+)/右转(-)，z=侧倾
 const EMOTION_HEAD := {
 	"neutral": Vector3(0, 0, 0),
-	"happy": Vector3(-4, 0, 3),
-	"sad": Vector3(8, 0, -3),
-	"angry": Vector3(5, 0, 0),
-	"surprised": Vector3(-7, 0, 0),
-	"shy": Vector3(2, 12, 5),
-	"thinking": Vector3(-5, -8, -3),
+	"happy": Vector3(-5, 0, 4),
+	"sad": Vector3(10, 0, -4),
+	"angry": Vector3(7, 0, 0),
+	"surprised": Vector3(-9, 0, 0),
+	"shy": Vector3(3, 14, 6),
+	"thinking": Vector3(-6, -9, -4),
 }
 
 # 情绪 -> 视线方向（x: 左+/右-，y: 上+/下-，0~1 比例）
@@ -45,10 +45,10 @@ const EMOTION_EYES := {
 	"thinking": Vector2(-0.4, 0.45),
 }
 
-const HEAD_NOD := [Vector3(8, 0, 0), Vector3(-3, 0, 0), Vector3(6, 0, 0), Vector3.ZERO]
-const HEAD_SHAKE := [Vector3(0, 10, 0), Vector3(0, -10, 0), Vector3(0, 8, 0), Vector3.ZERO]
-const HEAD_TILT := [Vector3(0, 0, 12), Vector3.ZERO]
-const ACTION_STEP_TIME := 0.16
+const HEAD_NOD := [Vector3(14, 0, 0), Vector3(-4, 0, 0), Vector3(10, 0, 0), Vector3.ZERO]
+const HEAD_SHAKE := [Vector3(0, 16, 0), Vector3(0, -16, 0), Vector3(0, 12, 0), Vector3.ZERO]
+const HEAD_TILT := [Vector3(0, 0, 20), Vector3.ZERO]
+const ACTION_STEP_TIME := 0.2
 
 var _avatar: Node3D = null
 var _skel: Skeleton3D = null

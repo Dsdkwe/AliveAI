@@ -2,7 +2,7 @@
 
 ## 一句话
 安卓 AI 语音助手/虚拟陪伴。最终愿景：AR 摄像头透视 3D 角色（VRM）。
-当前阶段：**竖切片已完成**（AI 对话 + 语音朗读 + 表情/姿态 + 中文界面）。
+当前阶段：**竖切片 + 第二轮打磨已完成**（AI 对话 + 语音朗读 + 表情/姿态 + 大字号全中文界面 + 运行时模型更换）。
 
 ## 已定死的技术决策
 - 客户端引擎：Godot 4.4.1（已放弃 Unity：个人版许可证无法在无桌面机环境激活，这是硬限制）
@@ -32,13 +32,17 @@
 8. **表情与姿态**：情绪→头部姿态 + 视线；眨眼（morph 驱动）；动作 nod / shake / tilt_head ✅
 9. **中文字体**：内嵌 Smiley Sans（+ SystemFont 兜底）✅
 10. AI 设置页：API Key / 模型 / 语音开关 / 测试连接 / 清空对话记忆 ✅
+11. **运行时加载外部 VRM**：`scripts/VrmLoader.gd`（6 扩展注册 + 命名绑定大小写修复 + meta 兜底），user:// 模型零转换直载 ✅
+12. **模型更换**：侧边栏「角色模型」区 —— 粘贴 .vrm 直链下载到 `user://models/`、列表点击切换、删除；选择持久化（`user://settings_app.json`）重启自动恢复 ✅
+13. **UI 放大 + 全中文**：字体默认 40、按钮 ≥96px、聊天输入 104px、侧边栏加宽；`canvas_items` 拉伸跨屏一致 ✅
+14. 动作幅度加大（点头 14° / 摇头 16° / 歪头 20°）✅
 
 ## 下一步（阶段 2：角色生动化，按优先级）
-1. **换更完整的 VRM 模型**：当前 gwen.vrm 只有 3 个 morph（眨眼），没有表情/口型形态键，情绪表达受限（见"已知坑"）
+1. **换更完整的 VRM 模型**：已支持 App 内下载/切换（见已完成 11-12）；gwen.vrm 只有 3 个 morph（眨眼），可下载带表情/口型形态键的模型（AvatarController 自动匹配候选名）
 2. 眼神追踪 LookAt 摄像头（插件自带 lookUp/Down/Left/Right 姿态，可直接复用）
 3. Spring Bone 物理开启验证（vrm_toplevel 中有 spring_bones 设置）
 4. 渲染打磨：MToon 调参、toon 描边、光影
-5. 可选：语音输入（STT）、Edge-TTS 音色（比系统 TTS 甜）
+5. **语音升级（用户点名"后面肯定要换"）**：Edge-TTS 音色（比系统 TTS 甜）、语音输入（STT）
 
 ## 关键约定（接手必须遵守）
 - Godot 版本锁定 **4.4.1**，升级只改 `.github/workflows/godot-build.yml` 顶部 `GODOT_VERSION`
@@ -53,3 +57,6 @@
 - 骨骼轴向（已在 gwen.vrm 上验证）：Head 局部 X=低头(+)/抬头(-)、Y=左转(+)、Z=侧倾；Jaw 负角=张嘴；眼皮骨默认四元数 (0.707,0,0,0.707)
 - 系统 TTS 依赖设备引擎；手机需装中文 TTS 数据，无引擎时 App 内自动降级提示
 - UI 字体缺字（如 ☰ 符号）由 SystemFont 兜底
+- **VRM 运行时加载三大坑（VrmLoader 已封装，勿绕过）**：①只注册 VRM0 的 `vrm_extension.gd` 会导致 VRM1.0 模型缺动画/弹簧骨，必须注册全部 6 个扩展；②命名绑定要大小写不敏感修复（`_fix_skins`），否则引擎把解析不到的绑定回退骨骼 0、蒙皮错乱；③部分模型 meta 缺 `modification` 字段，`generate_scene` 前需补默认值（`_sanitize_vrm1_meta`）
+- 运行时加载 gwen 会打 3 条 "Morph target bind is null" 警告（addon 已知 FIXME），不影响功能
+- `user://*.vrm` 用 `VrmLoader.load_vrm()` 加载；`res://` 已导入模型直接 `load()` 拿 PackedScene
