@@ -95,15 +95,6 @@ var _cur_model_path := ""
 
 # 侧边栏手势路由 / 菜单热区
 var _menu_hotspot: Control = null
-# AR 摄像头（Android 原生插件；桌面/插件缺失时静默回退深色背景）
-var _ar_plugin = null
-var _ar_tex: ImageTexture = null
-var _ar_img: Image = null
-var _ar_mat: StandardMaterial3D = null
-var _ar_quad: MeshInstance3D = null
-var _ar_pending := false
-var _ar_wait := 0.0
-const AR_BG_DIST := 30.0
 var _sidebar_scroll: ScrollContainer = null
 var _sb_touch_idx := -1
 var _sb_drag_total := Vector2.ZERO
@@ -117,7 +108,6 @@ func _ready() -> void:
 	_setup_camera()
 	_setup_ai()
 	_setup_ui()
-	_setup_ar()
 	_scan_timer = Timer.new()
 	_scan_timer.wait_time = SCAN_AUTO_INTERVAL
 	_scan_timer.autostart = true
@@ -144,7 +134,6 @@ func _process(_delta: float) -> void:
 			_dl_label.text = "下载中… %.1f MB" % (got / 1048576.0)
 	if _sidebar_open:
 		_update_sidebar_handle()
-	_tick_ar(_delta)
 
 func _on_menu_hotspot_input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
@@ -1409,83 +1398,6 @@ func _setup_light() -> void:
 	sun.directional_shadow_max_distance = 24.0
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	add_child(sun)
-
-# ------------------------------------------------------------------ AR 摄像头（Android 原生插件）
-
-func _setup_ar() -> void:
-	if Engine.has_singleton("HHCamera"):
-		_ar_plugin = Engine.get_singleton("HHCamera")
-		_ar_pending = true
-		_ar_wait = 0.0
-		var granted := OS.get_granted_permissions()
-		if not granted.has("android.permission.CAMERA"):
-			OS.request_permissions()
-		print("[AR] plugin found, waiting for camera permission")
-	else:
-		print("[AR] plugin not found (desktop / non-plugin build) - dark background")
-
-func _tick_ar(delta: float) -> void:
-	if _ar_plugin == null:
-		return
-	if _ar_pending:
-		_ar_wait += delta
-		if _ar_wait < 1.2:
-			return
-		_ar_pending = false
-		var granted := OS.get_granted_permissions()
-		if granted.has("android.permission.CAMERA"):
-			_ar_plugin.start()
-			_build_ar_bg()
-			print("[AR] camera started")
-		else:
-			print("[AR] camera permission not granted")
-		return
-	if _ar_quad == null:
-		return
-	# 背景画面跟随相机（充当“现实”背景板）
-	var ct := _cam.global_transform
-	_ar_quad.global_transform = Transform3D(ct.basis, ct.origin - ct.basis.z * AR_BG_DIST)
-	# 拉取最新相机帧（JPEG）
-	var jpg = _ar_plugin.poll()
-	if jpg != null and jpg.size() > 200:
-		if _ar_img == null:
-			_ar_img = Image.new()
-		if _ar_img.load_jpg_from_buffer(jpg) == OK:
-			var rot := int(_ar_plugin.getRotationDegrees())
-			if rot == 90:
-				_ar_img.rotate_90(ClockDirection.CLOCKWISE)
-			elif rot == 180:
-				_ar_img.rotate_180()
-			elif rot == 270:
-				_ar_img.rotate_90(ClockDirection.COUNTERCLOCKWISE)
-			if _ar_tex == null:
-				_ar_tex = ImageTexture.create_from_image(_ar_img)
-				_ar_mat.albedo_texture = _ar_tex
-				_ar_quad.visible = true
-			else:
-				_ar_tex.update(_ar_img)
-
-func _build_ar_bg() -> void:
-	if _ar_quad != null or _cam == null:
-		return
-	_ar_quad = MeshInstance3D.new()
-	_ar_quad.name = "ARCameraBackground"
-	var qm := QuadMesh.new()
-	var d := AR_BG_DIST
-	var vh := 2.0 * d * tan(deg_to_rad(_cam.fov) * 0.5) * 1.06
-	var vw := vh * (get_viewport().get_visible_rect().size.x / maxf(get_viewport().get_visible_rect().size.y, 1.0)) * 1.06
-	qm.size = Vector2(vw, vh)
-	qm.flip_faces = true
-	_ar_mat = StandardMaterial3D.new()
-	_ar_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_ar_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	_ar_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
-	_ar_mat.albedo_color = Color.WHITE
-	_ar_quad.mesh = qm
-	_ar_quad.material_override = _ar_mat
-	_ar_quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_ar_quad.visible = false
-	add_child(_ar_quad)
 
 func _setup_camera() -> void:
 	_cam = Camera3D.new()
