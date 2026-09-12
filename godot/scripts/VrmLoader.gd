@@ -157,6 +157,29 @@ static func _collect_meshes(n: Node, out: Array) -> void:
 	for c in n.get_children():
 		_collect_meshes(c, out)
 
+static func refresh_skeleton_poses(root: Node) -> void:
+	# 修复 Godot 骨骼全局姿态缓存问题（“青蛙腿”/“头部内凹”根因）：
+	# VRM 插件在场景树外完成「pose 初始化成 rest 值」后，由于 set_bone_pose_*
+	# 在未入树时不标记全局姿态脏位，部分骨骼的全局姿态缓存会冻结在中间状态，
+	# 表现为四肢/头部朝向错误（大腿倒转 180°、手 120°、眼 90° 等）。
+	# 必须在 root 已 add_child（进入场景树）之后调用：把每个骨骼的 pose 分量
+	# 按原值重写一遍，触发全骨架脏位重算，缓存即与 rest 一致。
+	var skels: Array = []
+	_collect_skels(root, skels)
+	for sk in skels:
+		for i in range(sk.get_bone_count()):
+			sk.set_bone_pose_position(i, sk.get_bone_pose_position(i))
+			sk.set_bone_pose_rotation(i, sk.get_bone_pose_rotation(i))
+			sk.set_bone_pose_scale(i, sk.get_bone_pose_scale(i))
+		if sk.has_method("force_update_all_bone_transforms"):
+			sk.call("force_update_all_bone_transforms")
+
+static func _collect_skels(n: Node, out: Array) -> void:
+	if n is Skeleton3D:
+		out.append(n)
+	for c in n.get_children():
+		_collect_skels(c, out)
+
 static func _find_first(n: Node, cls: String) -> Object:
 	if n.is_class(cls):
 		return n

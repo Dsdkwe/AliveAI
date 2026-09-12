@@ -212,6 +212,8 @@ func _load_vrm(path: String) -> void:
 		_avatar = null
 	_avatar = av
 	add_child(_avatar)
+	# 修复骨骼全局姿态缓存冻结（青蛙腿/头部内凹根因）：必须在入树后调用
+	VrmLoader.refresh_skeleton_poses(_avatar)
 	_avatar_ctrl = AvatarController.new()
 	_avatar_ctrl.name = "AvatarController"
 	add_child(_avatar_ctrl)
