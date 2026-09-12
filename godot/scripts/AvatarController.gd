@@ -45,10 +45,10 @@ const EMOTION_EYES := {
 	"thinking": Vector2(-0.4, 0.45),
 }
 
-const HEAD_NOD := [Vector3(14, 0, 0), Vector3(-4, 0, 0), Vector3(10, 0, 0), Vector3.ZERO]
-const HEAD_SHAKE := [Vector3(0, 16, 0), Vector3(0, -16, 0), Vector3(0, 12, 0), Vector3.ZERO]
+const HEAD_NOD := [Vector3(26, 0, 0), Vector3(-6, 0, 0), Vector3(18, 0, 0), Vector3.ZERO]
+const HEAD_SHAKE := [Vector3(0, 20, 0), Vector3(0, -20, 0), Vector3(0, 15, 0), Vector3.ZERO]
 const HEAD_TILT := [Vector3(0, 0, 20), Vector3.ZERO]
-const ACTION_STEP_TIME := 0.2
+const ACTION_STEP_TIME := 0.24
 
 var _avatar: Node3D = null
 var _skel: Skeleton3D = null

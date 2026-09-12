@@ -73,6 +73,8 @@ var _dl_btn: Button = null
 var _dl_label: Label = null
 var _downloading := false
 var _dl_final := ""
+var _up_btn: Button = null
+var _up_busy := false
 var _cur_model_path := ""
 
 func _ready() -> void:
@@ -152,8 +154,13 @@ func _load_vrm(path: String) -> void:
 	if av == null and not path.begins_with("res://"):
 		_show_status("正在加载模型…（大文件请稍等）")
 		await get_tree().process_frame
-		await get_tree().process_frame
-		var res := VrmLoader.load_vrm(path)
+		var res: Dictionary = {}
+		# 帧间最多重试 2 轮（配合 VrmLoader 内部同帧重试），规避偶发生成中断
+		for _round in range(3):
+			res = VrmLoader.load_vrm(path)
+			if res["ok"] and _anim_exists(res["node"]):
+				break
+			await get_tree().process_frame
 		if res["ok"]:
 			av = res["node"]
 		else:
@@ -226,24 +233,24 @@ func _refresh_model_list() -> void:
 	if models.is_empty():
 		var empty := Label.new()
 		empty.text = "（暂无模型，可在下方下载）"
-		empty.add_theme_font_size_override("font_size", 36)
+		empty.add_theme_font_size_override("font_size", 46)
 		_model_box.add_child(empty)
 		return
 	for m in models:
 		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 8)
+		row.add_theme_constant_override("separation", 12)
 		var b := Button.new()
 		b.text = str(m["name"]) + ("（自装）" if m["user"] else "")
-		b.add_theme_font_size_override("font_size", 40)
-		b.custom_minimum_size = Vector2(0, 96)
+		b.add_theme_font_size_override("font_size", 52)
+		b.custom_minimum_size = Vector2(0, 128)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(_on_model_picked.bind(str(m["path"])))
 		row.add_child(b)
 		if m["user"]:
 			var del := Button.new()
 			del.text = "删除"
-			del.add_theme_font_size_override("font_size", 34)
-			del.custom_minimum_size = Vector2(120, 96)
+			del.add_theme_font_size_override("font_size", 44)
+			del.custom_minimum_size = Vector2(150, 128)
 			del.pressed.connect(_on_delete_model.bind(str(m["path"]), str(m["name"])))
 			row.add_child(del)
 		_model_box.add_child(row)
@@ -295,14 +302,136 @@ func _load_last_model() -> String:
 			return p
 	return ""
 
+
+# ---------------------------------------------------------------- 上传导入
+
+func _on_upload_pressed() -> void:
+	if _up_busy:
+		return
+	var err := DisplayServer.file_dialog_show("选择模型文件", "", "", false, DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, ["*.vrm,*.zip;模型文件;application/octet-stream"], _on_file_picked)
+	if err != OK:
+		_show_status("无法打开文件选择器（错误码 %d）" % err)
+		return
+	_up_busy = true
+	_show_status("已打开文件选择器，请选择 .vrm 或 .zip …")
+	await get_tree().create_timer(20.0).timeout
+	if _up_busy:
+		_up_busy = false
+		_show_status("未收到文件选择结果（文件选择器需要 Android 10 及以上系统）")
+
+func _on_file_picked(ok: bool, paths: PackedStringArray, _filter_index: int) -> void:
+	_up_busy = false
+	if not ok or paths.is_empty():
+		_show_status("已取消选择")
+		return
+	var src := str(paths[0])
+	_show_status("正在导入：" + src.get_file() + " …")
+	await get_tree().process_frame
+	var res := _import_model_file(src)
+	_show_status(str(res["msg"]))
+	if bool(res["ok"]):
+		_refresh_model_list()
+		_load_vrm(str(res["path"]))
+
+func _import_model_file(src: String) -> Dictionary:
+	if src.to_lower().ends_with(".zip"):
+		return _import_zip(src)
+	return _copy_to_user_models(src, src.get_file())
+
+func _copy_to_user_models(src: String, name: String) -> Dictionary:
+	var f := FileAccess.open(src, FileAccess.READ)
+	if f == null:
+		return {"ok": false, "msg": "读取失败（错误码 %d）。Android 11+ 设备请到：系统设置 → 应用 → Half-hearted AI → 权限，开启「所有文件访问」后重试" % FileAccess.get_open_error(), "path": ""}
+	var size := f.get_length()
+	if size <= 0:
+		f.close()
+		return {"ok": false, "msg": "文件为空或无法读取", "path": ""}
+	var fname := _sanitize_filename(name)
+	if fname == "":
+		fname = "model_%d.vrm" % int(Time.get_unix_time_from_system())
+	var dst := USER_MODEL_DIR + "/" + fname
+	var w := FileAccess.open(dst, FileAccess.WRITE)
+	if w == null:
+		f.close()
+		return {"ok": false, "msg": "写入失败（存储空间不足？）", "path": ""}
+	var chunk := 4 * 1024 * 1024
+	var done := 0
+	while done < size:
+		var n: int = mini(chunk, int(size) - done)
+		var buf := f.get_buffer(n)
+		if buf.is_empty():
+			break
+		w.store_buffer(buf)
+		done += buf.size()
+	f.close()
+	w.close()
+	if done != size:
+		DirAccess.remove_absolute(dst)
+		return {"ok": false, "msg": "复制中断（%d/%d 字节）" % [done, int(size)], "path": ""}
+	return {"ok": true, "msg": "已导入：" + fname, "path": dst}
+
+func _import_zip(src: String) -> Dictionary:
+	var tmp := _copy_to_user_models(src, "_upload_tmp.zip")
+	if not bool(tmp["ok"]):
+		return tmp
+	var zpath := str(tmp["path"])
+	var zr := ZIPReader.new()
+	var e := zr.open(zpath)
+	if e != OK:
+		DirAccess.remove_absolute(zpath)
+		return {"ok": false, "msg": "无法读取压缩包（错误码 %d）" % e, "path": ""}
+	var target := ""
+	for p in zr.get_files():
+		if str(p).to_lower().ends_with(".vrm"):
+			target = str(p)
+			break
+	if target == "":
+		zr.close()
+		DirAccess.remove_absolute(zpath)
+		return {"ok": false, "msg": "压缩包里没有找到 .vrm 模型文件", "path": ""}
+	var data := zr.read_file(target)
+	zr.close()
+	DirAccess.remove_absolute(zpath)
+	if data.is_empty():
+		return {"ok": false, "msg": "压缩包内模型读取失败", "path": ""}
+	var fname := _sanitize_filename(target.get_file())
+	var dst := USER_MODEL_DIR + "/" + fname
+	var w := FileAccess.open(dst, FileAccess.WRITE)
+	if w == null:
+		return {"ok": false, "msg": "写入失败（存储空间不足？）", "path": ""}
+	w.store_buffer(data)
+	w.close()
+	return {"ok": true, "msg": "已从压缩包导入：" + fname, "path": dst}
+
+func _test_action(a: String) -> void:
+	if _avatar_ctrl == null:
+		_show_status("角色尚未就绪")
+		return
+	_avatar_ctrl.play_action(a)
+	_show_status("动作：" + _act_cn(a))
+
+func _anim_exists(root: Node) -> bool:
+	# 校验运行时加载的模型场景是否含可用动画（VRM 正常生成时应带 AnimationPlayer）
+	if root == null:
+		return false
+	for c in root.get_children():
+		if c is AnimationPlayer:
+			return (c as AnimationPlayer).get_animation_list().size() > 0
+	return false
+
 func _sanitize_filename(fname: String) -> String:
+	# 宽松过滤：保留中文等 Unicode 字符，只替换文件系统危险字符
 	var out := ""
 	for i in fname.length():
 		var c := fname[i]
-		if (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9") or c == "." or c == "_" or c == "-":
-			out += c
-		else:
+		var code := c.unicode_at(0)
+		if c == "/" or c == ":" or c == "*" or c == "?" or c == "<" or c == ">" or c == "|" or code < 32 or code == 34 or code == 92:
 			out += "_"
+		else:
+			out += c
+	out = out.strip_edges()
+	if out.length() > 60:
+		out = out.substr(0, 60)
 	return out
 
 func _on_download_pressed() -> void:
@@ -377,14 +506,14 @@ func _toggle_sidebar() -> void:
 func _add_slider_row(parent: Control, title: String, min_v: float, max_v: float, step_v: float, init_v: float, cb: Callable) -> HSlider:
 	var lbl := Label.new()
 	lbl.text = title
-	lbl.add_theme_font_size_override("font_size", 40)
+	lbl.add_theme_font_size_override("font_size", 50)
 	parent.add_child(lbl)
 	var s := HSlider.new()
 	s.min_value = min_v
 	s.max_value = max_v
 	s.step = step_v
 	s.value = init_v
-	s.custom_minimum_size = Vector2(0, 80)
+	s.custom_minimum_size = Vector2(0, 96)
 	s.value_changed.connect(cb)
 	parent.add_child(s)
 	return s
@@ -552,7 +681,7 @@ func _setup_font() -> void:
 	sys.font_names = PackedStringArray(["sans-serif", "Noto Sans CJK SC", "Noto Sans SC", "Droid Sans Fallback"])
 	if f and f.get("fallbacks") != null:
 		f.set("fallbacks", [sys])
-	theme.default_font_size = 40
+	theme.default_font_size = 52
 	var win := get_window()
 	if win:
 		win.theme = theme
@@ -563,7 +692,7 @@ func _setup_ui() -> void:
 	add_child(_ui_layer)
 
 	var view: Vector2 = get_viewport().get_visible_rect().size
-	_sidebar_w = clamp(view.x * 0.46, 460.0, 640.0)
+	_sidebar_w = clamp(view.x * 0.52, 560.0, 760.0)
 
 	# ---- 聊天面板（底部）----
 	var panel_sb := StyleBoxFlat.new()
@@ -580,13 +709,13 @@ func _setup_ui() -> void:
 	_chat_panel.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	_chat_panel.offset_left = 16
 	_chat_panel.offset_right = -16
-	_chat_panel.offset_top = -780
+	_chat_panel.offset_top = -840
 	_chat_panel.offset_bottom = -16
 	_chat_panel.add_theme_stylebox_override("panel", panel_sb)
 	_ui_layer.add_child(_chat_panel)
 
 	var chat_vbox := VBoxContainer.new()
-	chat_vbox.add_theme_constant_override("separation", 12)
+	chat_vbox.add_theme_constant_override("separation", 16)
 	_chat_panel.add_child(chat_vbox)
 
 	var chat_head := HBoxContainer.new()
@@ -594,7 +723,7 @@ func _setup_ui() -> void:
 
 	var who := Label.new()
 	who.text = "720"
-	who.add_theme_font_size_override("font_size", 54)
+	who.add_theme_font_size_override("font_size", 64)
 	chat_head.add_child(who)
 
 	var head_spacer := Control.new()
@@ -603,33 +732,33 @@ func _setup_ui() -> void:
 
 	_emotion_label = Label.new()
 	_emotion_label.text = "情绪：平静"
-	_emotion_label.add_theme_font_size_override("font_size", 40)
+	_emotion_label.add_theme_font_size_override("font_size", 50)
 	chat_head.add_child(_emotion_label)
 
 	_chat_log = RichTextLabel.new()
 	_chat_log.bbcode_enabled = true
 	_chat_log.scroll_following = true
 	_chat_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_chat_log.custom_minimum_size = Vector2(0, 420)
-	_chat_log.add_theme_font_size_override("normal_font_size", 44)
+	_chat_log.custom_minimum_size = Vector2(0, 460)
+	_chat_log.add_theme_font_size_override("normal_font_size", 54)
 	chat_vbox.add_child(_chat_log)
 
 	var input_row := HBoxContainer.new()
-	input_row.add_theme_constant_override("separation", 12)
+	input_row.add_theme_constant_override("separation", 16)
 	chat_vbox.add_child(input_row)
 
 	_chat_input = LineEdit.new()
 	_chat_input.placeholder_text = "和720说点什么…"
 	_chat_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_chat_input.custom_minimum_size = Vector2(0, 104)
-	_chat_input.add_theme_font_size_override("font_size", 44)
+	_chat_input.custom_minimum_size = Vector2(0, 132)
+	_chat_input.add_theme_font_size_override("font_size", 54)
 	_chat_input.text_submitted.connect(_on_send)
 	input_row.add_child(_chat_input)
 
 	_send_btn = Button.new()
 	_send_btn.text = "发送"
-	_send_btn.custom_minimum_size = Vector2(200, 104)
-	_send_btn.add_theme_font_size_override("font_size", 44)
+	_send_btn.custom_minimum_size = Vector2(240, 132)
+	_send_btn.add_theme_font_size_override("font_size", 54)
 	_send_btn.pressed.connect(_on_send)
 	input_row.add_child(_send_btn)
 
@@ -645,50 +774,77 @@ func _setup_ui() -> void:
 
 	var vbox := VBoxContainer.new()
 	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_theme_constant_override("separation", 16)
+	vbox.add_theme_constant_override("separation", 20)
 	scroll.add_child(vbox)
 
 	var spacer := Control.new()
-	spacer.custom_minimum_size = Vector2(0, 160)
+	spacer.custom_minimum_size = Vector2(0, 184)
 	vbox.add_child(spacer)
 
 	var title := Label.new()
 	title.text = "Half-hearted AI"
-	title.add_theme_font_size_override("font_size", 54)
+	title.add_theme_font_size_override("font_size", 64)
 	vbox.add_child(title)
 
 	# ---- 角色模型 ----
 	var mlbl := Label.new()
 	mlbl.text = "-- 角色模型 --"
-	mlbl.add_theme_font_size_override("font_size", 44)
+	mlbl.add_theme_font_size_override("font_size", 54)
 	vbox.add_child(mlbl)
 
 	_model_box = VBoxContainer.new()
-	_model_box.add_theme_constant_override("separation", 8)
+	_model_box.add_theme_constant_override("separation", 12)
 	vbox.add_child(_model_box)
 	_refresh_model_list()
 
+	# ---- 上传 / 动作测试 ----
+	var up_lbl := Label.new()
+	up_lbl.text = "换模型（推荐：从手机选择文件）"
+	up_lbl.add_theme_font_size_override("font_size", 50)
+	vbox.add_child(up_lbl)
+	_up_btn = Button.new()
+	_up_btn.text = "从手机选择 .vrm / .zip"
+	_up_btn.add_theme_font_size_override("font_size", 52)
+	_up_btn.custom_minimum_size = Vector2(0, 128)
+	_up_btn.pressed.connect(_on_upload_pressed)
+	vbox.add_child(_up_btn)
+	var act_lbl := Label.new()
+	act_lbl.text = "动作测试"
+	act_lbl.add_theme_font_size_override("font_size", 50)
+	vbox.add_child(act_lbl)
+	var act_row := HBoxContainer.new()
+	act_row.add_theme_constant_override("separation", 12)
+	for item in [["点头", "nod"], ["摇头", "shake"], ["歪头", "tilt_head"]]:
+		var ab := Button.new()
+		ab.text = item[0]
+		ab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ab.custom_minimum_size = Vector2(0, 120)
+		ab.add_theme_font_size_override("font_size", 48)
+		ab.pressed.connect(_test_action.bind(item[1]))
+		act_row.add_child(ab)
+	vbox.add_child(act_row)
+
 	var dl_lbl := Label.new()
 	dl_lbl.text = "下载新模型（.vrm 直链）"
-	dl_lbl.add_theme_font_size_override("font_size", 40)
+	dl_lbl.add_theme_font_size_override("font_size", 50)
 	vbox.add_child(dl_lbl)
 
 	_dl_url_edit = LineEdit.new()
 	_dl_url_edit.placeholder_text = "粘贴 .vrm 下载链接…"
-	_dl_url_edit.add_theme_font_size_override("font_size", 36)
-	_dl_url_edit.custom_minimum_size = Vector2(0, 96)
+	_dl_url_edit.add_theme_font_size_override("font_size", 46)
+	_dl_url_edit.custom_minimum_size = Vector2(0, 128)
 	vbox.add_child(_dl_url_edit)
 
 	_dl_btn = Button.new()
 	_dl_btn.text = "下载并切换"
-	_dl_btn.add_theme_font_size_override("font_size", 40)
-	_dl_btn.custom_minimum_size = Vector2(0, 100)
+	_dl_btn.add_theme_font_size_override("font_size", 52)
+	_dl_btn.custom_minimum_size = Vector2(0, 128)
 	_dl_btn.pressed.connect(_on_download_pressed)
 	vbox.add_child(_dl_btn)
 
 	_dl_label = Label.new()
 	_dl_label.text = ""
-	_dl_label.add_theme_font_size_override("font_size", 34)
+	_dl_label.add_theme_font_size_override("font_size", 44)
 	_dl_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vbox.add_child(_dl_label)
 
@@ -700,72 +856,72 @@ func _setup_ui() -> void:
 	# ---- AI 设置 ----
 	var ai_lbl := Label.new()
 	ai_lbl.text = "-- AI 设置 --"
-	ai_lbl.add_theme_font_size_override("font_size", 44)
+	ai_lbl.add_theme_font_size_override("font_size", 54)
 	vbox.add_child(ai_lbl)
 
 	var k_lbl := Label.new()
 	k_lbl.text = "DeepSeek 密钥"
-	k_lbl.add_theme_font_size_override("font_size", 40)
+	k_lbl.add_theme_font_size_override("font_size", 50)
 	vbox.add_child(k_lbl)
 
 	_key_edit = LineEdit.new()
 	_key_edit.secret = true
 	_key_edit.placeholder_text = "sk-..."
-	_key_edit.add_theme_font_size_override("font_size", 36)
-	_key_edit.custom_minimum_size = Vector2(0, 96)
+	_key_edit.add_theme_font_size_override("font_size", 46)
+	_key_edit.custom_minimum_size = Vector2(0, 128)
 	if _brain:
 		_key_edit.text = _brain.api_key
 	vbox.add_child(_key_edit)
 
 	var m_lbl := Label.new()
 	m_lbl.text = "对话模型（DeepSeek）"
-	m_lbl.add_theme_font_size_override("font_size", 40)
+	m_lbl.add_theme_font_size_override("font_size", 50)
 	vbox.add_child(m_lbl)
 
 	_model_edit = LineEdit.new()
-	_model_edit.add_theme_font_size_override("font_size", 36)
-	_model_edit.custom_minimum_size = Vector2(0, 96)
+	_model_edit.add_theme_font_size_override("font_size", 46)
+	_model_edit.custom_minimum_size = Vector2(0, 128)
 	if _brain:
 		_model_edit.text = _brain.model
 	vbox.add_child(_model_edit)
 
 	var btn_row := HBoxContainer.new()
-	btn_row.add_theme_constant_override("separation", 12)
+	btn_row.add_theme_constant_override("separation", 16)
 	vbox.add_child(btn_row)
 
 	_save_btn = Button.new()
 	_save_btn.text = "保存设置"
-	_save_btn.add_theme_font_size_override("font_size", 40)
-	_save_btn.custom_minimum_size = Vector2(0, 100)
+	_save_btn.add_theme_font_size_override("font_size", 52)
+	_save_btn.custom_minimum_size = Vector2(0, 128)
 	_save_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_save_btn.pressed.connect(_on_save_settings)
 	btn_row.add_child(_save_btn)
 
 	_test_btn = Button.new()
 	_test_btn.text = "测试连接"
-	_test_btn.add_theme_font_size_override("font_size", 40)
-	_test_btn.custom_minimum_size = Vector2(0, 100)
+	_test_btn.add_theme_font_size_override("font_size", 52)
+	_test_btn.custom_minimum_size = Vector2(0, 128)
 	_test_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_test_btn.pressed.connect(_on_test_pressed)
 	btn_row.add_child(_test_btn)
 
 	_tts_check = CheckBox.new()
 	_tts_check.text = "语音朗读"
-	_tts_check.add_theme_font_size_override("font_size", 40)
+	_tts_check.add_theme_font_size_override("font_size", 52)
 	_tts_check.button_pressed = _brain.tts_enabled if _brain else true
 	_tts_check.toggled.connect(_on_tts_toggled)
 	vbox.add_child(_tts_check)
 
 	_clear_btn = Button.new()
 	_clear_btn.text = "清空对话记忆"
-	_clear_btn.add_theme_font_size_override("font_size", 40)
-	_clear_btn.custom_minimum_size = Vector2(0, 100)
+	_clear_btn.add_theme_font_size_override("font_size", 52)
+	_clear_btn.custom_minimum_size = Vector2(0, 128)
 	_clear_btn.pressed.connect(_on_clear_pressed)
 	vbox.add_child(_clear_btn)
 
 	_status = Label.new()
 	_status.text = "就绪"
-	_status.add_theme_font_size_override("font_size", 36)
+	_status.add_theme_font_size_override("font_size", 46)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vbox.add_child(_status)
 
@@ -774,7 +930,7 @@ func _setup_ui() -> void:
 	_menu_btn.text = "\u2630"
 	_menu_btn.position = Vector2(20, 20)
 	_menu_btn.size = Vector2(140, 140)
-	_menu_btn.add_theme_font_size_override("font_size", 72)
+	_menu_btn.add_theme_font_size_override("font_size", 88)
 	_menu_btn.pressed.connect(_toggle_sidebar)
 	_ui_layer.add_child(_menu_btn)
 
