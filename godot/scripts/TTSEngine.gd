@@ -7,9 +7,9 @@ signal speech_started
 signal speech_finished
 signal tts_unavailable(message: String)
 
-const VOICE_VOLUME := 90.0  # 0~100
-const VOICE_PITCH := 50.0
-const VOICE_RATE := 50.0
+const VOICE_VOLUME := 90  # 0~100（音量）
+const VOICE_PITCH := 1.0  # 0.0~2.0，1.0 = 默认音高
+const VOICE_RATE := 1.0   # 0.1~10.0，1.0 = 正常语速
 
 var enabled := true
 
