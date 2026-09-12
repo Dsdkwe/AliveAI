@@ -28,6 +28,11 @@ const MODEL_DIR := "res://assets/models"
 const USER_MODEL_DIR := "user://models"
 const APP_SETTINGS_PATH := "user://settings_app.json"
 const FONT_PATH := "res://assets/fonts/SmileySans-Oblique.ttf"
+const SCAN_DIRS := [
+	"/storage/emulated/0/Download/HalfHearted",
+	"/storage/emulated/0/Download",
+	"/storage/emulated/0/Android/data/com.hta.halfhearted/files/import",
+]
 
 const EMO_CN := {
 	"neutral": "平静",
@@ -75,6 +80,11 @@ var _downloading := false
 var _dl_final := ""
 var _up_btn: Button = null
 var _up_busy := false
+var _scan_btn: Button = null
+var _scan_box: VBoxContainer = null
+var _scan_dirs_override: Array = []
+var _toast: Label = null
+var _toast_seq := 0
 var _cur_model_path := ""
 
 func _ready() -> void:
@@ -232,7 +242,7 @@ func _refresh_model_list() -> void:
 	var models := _gather_models()
 	if models.is_empty():
 		var empty := Label.new()
-		empty.text = "（暂无模型，可在下方下载）"
+		empty.text = "（暂无模型，可用下方「文件夹导入」）"
 		empty.add_theme_font_size_override("font_size", 46)
 		_model_box.add_child(empty)
 		return
@@ -307,33 +317,39 @@ func _load_last_model() -> String:
 
 func _on_upload_pressed() -> void:
 	if _up_busy:
+		_notify("文件选择器已打开，请先完成当前选择")
 		return
-	var err := DisplayServer.file_dialog_show("选择模型文件", "", "", false, DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, ["*.vrm,*.zip;模型文件;application/octet-stream"], _on_file_picked)
+	var err := DisplayServer.file_dialog_show("选择模型文件", "", "", false, DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, ["*;所有文件;*"], _on_file_picked)
 	if err != OK:
-		_show_status("无法打开文件选择器（错误码 %d）" % err)
+		_notify("无法打开文件选择器（错误码 %d）。可改用「文件夹导入」" % err, true)
 		return
 	_up_busy = true
 	_show_status("已打开文件选择器，请选择 .vrm 或 .zip …")
-	await get_tree().create_timer(20.0).timeout
+	await get_tree().create_timer(15.0).timeout
 	if _up_busy:
 		_up_busy = false
-		_show_status("未收到文件选择结果（文件选择器需要 Android 10 及以上系统）")
+		_notify("未收到选择结果。若选了文件没反应：请改用「文件夹导入」（复制到 Download/HalfHearted/ 后扫描）", true)
 
 func _on_file_picked(ok: bool, paths: PackedStringArray, _filter_index: int) -> void:
 	_up_busy = false
 	if not ok or paths.is_empty():
-		_show_status("已取消选择")
+		_notify("没有收到文件（取消，或系统未返回路径）。若选了文件没反应，请改用「文件夹导入」", true)
 		return
 	var src := str(paths[0])
-	_show_status("正在导入：" + src.get_file() + " …")
+	var low := src.to_lower()
+	if not (low.ends_with(".vrm") or low.ends_with(".zip")):
+		_notify("选到的是「%s」，不是 .vrm / .zip 模型文件，请重新选择" % src.get_file(), true)
+		return
+	_notify("正在导入：" + src.get_file() + " …")
 	await get_tree().process_frame
 	var res := _import_model_file(src)
-	_show_status(str(res["msg"]))
+	_notify(str(res["msg"]), true)
 	if bool(res["ok"]):
 		_refresh_model_list()
 		_load_vrm(str(res["path"]))
 
 func _import_model_file(src: String) -> Dictionary:
+	DirAccess.make_dir_recursive_absolute(USER_MODEL_DIR)
 	if src.to_lower().ends_with(".zip"):
 		return _import_zip(src)
 	return _copy_to_user_models(src, src.get_file())
@@ -341,7 +357,7 @@ func _import_model_file(src: String) -> Dictionary:
 func _copy_to_user_models(src: String, name: String) -> Dictionary:
 	var f := FileAccess.open(src, FileAccess.READ)
 	if f == null:
-		return {"ok": false, "msg": "读取失败（错误码 %d）。Android 11+ 设备请到：系统设置 → 应用 → Half-hearted AI → 权限，开启「所有文件访问」后重试" % FileAccess.get_open_error(), "path": ""}
+		return {"ok": false, "msg": "读取失败（错误码 %d）。请到系统设置→应用→Half-hearted AI 开启「所有文件访问/所有文件管理」后重试；或改用「文件夹导入」" % FileAccess.get_open_error(), "path": ""}
 	var size := f.get_length()
 	if size <= 0:
 		f.close()
@@ -402,6 +418,115 @@ func _import_zip(src: String) -> Dictionary:
 	w.store_buffer(data)
 	w.close()
 	return {"ok": true, "msg": "已从压缩包导入：" + fname, "path": dst}
+
+# ---------------------------------------------------------------- 文件夹导入
+
+func _scan_dirs() -> Array:
+	if not _scan_dirs_override.is_empty():
+		return _scan_dirs_override
+	return SCAN_DIRS.duplicate()
+
+func _on_scan_pressed() -> void:
+	if _scan_box == null:
+		return
+	for c in _scan_box.get_children():
+		_scan_box.remove_child(c)
+		c.queue_free()
+	_ensure_scan_dirs()
+	var probe := DirAccess.open("/storage/emulated/0/Download")
+	var found: Array = _find_model_files(_scan_dirs())
+	if found.is_empty():
+		if probe == null:
+			_notify("读取不了手机存储：请到系统设置→应用→Half-hearted AI 开启「所有文件访问/所有文件管理」；也可把模型放到 Android/data/com.hta.halfhearted/files/import/ 再扫描", true)
+		else:
+			_notify("没找到 .vrm / .zip。把模型复制到：内部存储/Download/HalfHearted/ 后重试", true)
+		return
+	var shown := 0
+	for m in found:
+		if shown >= 30:
+			break
+		_add_scan_row(m)
+		shown += 1
+	if found.size() > shown:
+		var more := Label.new()
+		more.text = "……还有 %d 个未显示" % (found.size() - shown)
+		more.add_theme_font_size_override("font_size", 40)
+		_scan_box.add_child(more)
+	_notify("找到 %d 个模型文件，点文件名即可导入" % found.size(), true)
+
+func _ensure_scan_dirs() -> void:
+	for d in _scan_dirs():
+		DirAccess.make_dir_recursive_absolute(str(d))
+
+func _find_model_files(dirs: Array) -> Array:
+	var out: Array = []
+	var seen := {}
+	for d in dirs:
+		_scan_dir_rec(str(d), out, seen, 0)
+	out.sort_custom(func(a, b): return int(a["mtime"]) > int(b["mtime"]))
+	return out
+
+func _scan_dir_rec(path: String, out: Array, seen: Dictionary, depth: int) -> void:
+	if depth > 3 or out.size() > 200:
+		return
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var f := dir.get_next()
+	while f != "":
+		if f.begins_with("."):
+			f = dir.get_next()
+			continue
+		var full := path.path_join(f)
+		if dir.current_is_dir():
+			_scan_dir_rec(full, out, seen, depth + 1)
+		else:
+			var low := f.to_lower()
+			if (low.ends_with(".vrm") or low.ends_with(".zip")) and not seen.has(full):
+				seen[full] = true
+				var fh := FileAccess.open(full, FileAccess.READ)
+				var sz := 0
+				if fh != null:
+					sz = fh.get_length()
+					fh.close()
+				out.append({"path": full, "name": f, "size": sz, "mtime": FileAccess.get_modified_time(full)})
+		f = dir.get_next()
+	dir.list_dir_end()
+
+func _add_scan_row(m: Dictionary) -> void:
+	var b := Button.new()
+	b.text = "%s（%.1f MB）" % [str(m["name"]), float(int(m["size"])) / 1048576.0]
+	b.add_theme_font_size_override("font_size", 46)
+	b.custom_minimum_size = Vector2(0, 118)
+	b.pressed.connect(_on_scan_import.bind(str(m["path"])))
+	_scan_box.add_child(b)
+
+func _on_scan_import(path: String) -> void:
+	_notify("正在导入：" + path.get_file() + " …")
+	await get_tree().process_frame
+	var res := _import_model_file(path)
+	_notify(str(res["msg"]), true)
+	if bool(res["ok"]):
+		_refresh_model_list()
+		_load_vrm(str(res["path"]))
+
+func _notify(msg: String, to_chat: bool = false) -> void:
+	_show_status(msg)
+	if to_chat:
+		_chat_append("系统", msg, "#ffd27f")
+
+func _toast_show(msg: String) -> void:
+	if _toast == null or not is_inside_tree():
+		return
+	_toast_seq += 1
+	var seq := _toast_seq
+	_toast.text = msg
+	_toast.modulate.a = 1.0
+	var t := get_tree().create_timer(6.0)
+	t.timeout.connect(func() -> void:
+		if _toast_seq == seq and _toast != null:
+			_toast.modulate.a = 0.0)
 
 func _test_action(a: String) -> void:
 	if _avatar_ctrl == null:
@@ -808,6 +933,25 @@ func _setup_ui() -> void:
 	_up_btn.custom_minimum_size = Vector2(0, 128)
 	_up_btn.pressed.connect(_on_upload_pressed)
 	vbox.add_child(_up_btn)
+	# ---- 文件夹导入 ----
+	var scan_lbl := Label.new()
+	scan_lbl.text = "文件夹导入（推荐）"
+	scan_lbl.add_theme_font_size_override("font_size", 50)
+	vbox.add_child(scan_lbl)
+	var scan_tip := Label.new()
+	scan_tip.text = "把 .vrm / .zip 复制到手机文件夹：\n内部存储/Download/HalfHearted/\n然后点下面按钮扫描导入"
+	scan_tip.add_theme_font_size_override("font_size", 40)
+	scan_tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(scan_tip)
+	_scan_btn = Button.new()
+	_scan_btn.text = "扫描文件夹里的模型"
+	_scan_btn.add_theme_font_size_override("font_size", 52)
+	_scan_btn.custom_minimum_size = Vector2(0, 128)
+	_scan_btn.pressed.connect(_on_scan_pressed)
+	vbox.add_child(_scan_btn)
+	_scan_box = VBoxContainer.new()
+	_scan_box.add_theme_constant_override("separation", 12)
+	vbox.add_child(_scan_box)
 	var act_lbl := Label.new()
 	act_lbl.text = "动作测试"
 	act_lbl.add_theme_font_size_override("font_size", 50)
@@ -934,6 +1078,22 @@ func _setup_ui() -> void:
 	_menu_btn.pressed.connect(_toggle_sidebar)
 	_ui_layer.add_child(_menu_btn)
 
+	# ---- 顶部提示条（重要消息直接显示在画面顶部）----
+	_toast = Label.new()
+	_toast.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	_toast.offset_left = 24
+	_toast.offset_right = -24
+	_toast.offset_top = 190
+	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_toast.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_toast.add_theme_font_size_override("font_size", 50)
+	_toast.add_theme_color_override("font_color", Color(1, 1, 1))
+	_toast.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	_toast.add_theme_constant_override("outline_size", 12)
+	_toast.modulate.a = 0.0
+	_ui_layer.add_child(_toast)
+
 	# ---- 下载器 ----
 	_dl_http = HTTPRequest.new()
 	_dl_http.timeout = 300.0
@@ -944,11 +1104,12 @@ func _setup_ui() -> void:
 	if _brain and _brain.configured():
 		_chat_append("系统", "720已就绪，说点什么吧", "#9fd0ff")
 	else:
-		_chat_append("系统", "欢迎使用！先点左上角 ☰，在「AI 设置」里填入 DeepSeek 密钥，然后就可以对话了。想换模型？在「角色模型」里粘贴 .vrm 下载链接即可。", "#9fd0ff")
+		_chat_append("系统", "欢迎使用！先点左上角 ☰，在「AI 设置」里填入 DeepSeek 密钥，然后就可以对话了。想换模型？把模型复制到 Download/HalfHearted/ 后用「文件夹导入」扫描即可。", "#9fd0ff")
 
 func _show_status(msg: String) -> void:
 	if _status:
 		_status.text = msg
+	_toast_show(msg)
 
 func _setup_environment() -> void:
 	var we := WorldEnvironment.new()

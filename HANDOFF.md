@@ -2,7 +2,7 @@
 
 ## 一句话
 安卓 AI 语音助手/虚拟陪伴。最终愿景：AR 摄像头透视 3D 角色（VRM）。
-当前阶段：**第三轮已完成**（上传导入模型 / 动作测试 / UI 再放大 / 运行时加载稳定性修复）。
+当前阶段：**第四轮已完成**（上传修复：全类型可选+扩展名校验+顶部 toast；新增「文件夹导入」扫描；权限诊断引导）。
 
 ## 已定死的技术决策
 - 客户端引擎：Godot 4.4.1（已放弃 Unity：个人版许可证无法在无桌面机环境激活，这是硬限制）
@@ -39,9 +39,12 @@
 15. **上传导入模型**：系统文件选择器（Android 10+）选择 `.vrm` / `.zip`，自动复制/解压到 `user://models/` 并切换 ✅
 16. **UI 第二轮放大 + 全中文**：字体基准 52、按钮 ≥128px、聊天输入 132px、侧边栏 52% 宽 ✅
 17. **运行时加载稳定性修复**：VrmLoader 改为「动画校验 + 双层重试」，修复首帧清理导致的偶发生成中断（详见已知坑）✅
+18. **上传修复 + 顶部提示条**：选择器过滤器改 `["*;所有文件;*"]`（Kotlin 侧退化为 `*/*`，全类型可选）；选择后校验扩展名；所有消息同步显示在画面顶部 toast（原来只在侧边栏底部，用户看不到）✅
+19. **文件夹导入（换模型推荐通道）**：侧边栏「文件夹导入」区 —— 扫描 `Download/HalfHearted/`、`Download/`、`Android/data/com.hta.halfhearted/files/import/` 里的 .vrm/.zip → 点文件名导入；自动建目录；失败含权限引导 ✅
+20. **权限答疑**：manifest 已含 `MANAGE_EXTERNAL_STORAGE`（系统设置里叫「所有文件访问/所有文件管理」）+ `READ_EXTERNAL_STORAGE`；用户开启后上传与扫描均可读共享存储 ✅
 
 ## 下一步（阶段 2：角色生动化，按优先级）
-1. **换更完整的 VRM 模型**：已支持 App 内上传/下载/切换（见已完成 11-15）；gwen.vrm 只有 3 个 morph（眨眼），可换带表情/口型形态键的模型（AvatarController 自动匹配候选名）
+1. **换更完整的 VRM 模型**：已支持 App 内上传/下载/切换（见已完成 11-19；推荐「文件夹导入」）；gwen.vrm 只有 3 个 morph（眨眼），可换带表情/口型形态键的模型（AvatarController 自动匹配候选名）
 2. 眼神追踪 LookAt 摄像头（插件自带 lookUp/Down/Left/Right 姿态，可直接复用）
 3. Spring Bone 物理开启验证（vrm_toplevel 中有 spring_bones 设置）
 4. 渲染打磨：MToon 调参、toon 描边、光影
@@ -62,6 +65,7 @@
 - UI 字体缺字（如 ☰ 符号）由 SystemFont 兜底
 - **VRM 运行时加载坑（VrmLoader 已封装，勿绕过）**：①扩展注册须与编辑器插件一致 —— VRM1.0 五个扩展全局注册，**VRM0 扩展按需临时注册**（`_is_vrm0_file` 检测 + 用完即 unregister）；②命名绑定要大小写不敏感修复（`_fix_skins`），否则引擎把解析不到的绑定回退骨骼 0、蒙皮错乱；③部分模型 meta 缺 `modification` 字段，`generate_scene` 前需补默认值（`_sanitize_vrm1_meta`）
 - **「previously freed instance」偶发生成中断（已修复，勿回退）**：主循环首帧清理之后首次运行时加载 VRM，扩展生成阶段偶发撞上已释放的中间节点，表现为场景缺动画（AnimationPlayer 无轨道）。修复 = **双层重试**（VrmLoader 内部最多 3 次同帧重试 + Bootstrap 帧间最多 3 轮），校验标准 = 动画轨道数 > 0。**忌：不要 free 失败的中间场景** —— free 会触发副作用导致后续重试全部失败（实测）
-- Android 文件选择器（上传模型）仅 **Android 10+** 支持；Android 11+ 读取共享存储若无「所有文件访问」权限会失败（App 内已含引导文案；导出已含 `manage_external_storage` / `read_external_storage` 权限）
+- **Android 文件选择器坑**：仅 Android 10+；SDK<10 或 activity 为空时静默无回调；返回的是磁盘路径而非 URI，Android 11+ 无「所有文件访问」时 FileAccess 读不了（godot#112136）；部分系统「下载」提供器无法转路径 → 回调 ok=false（与取消不可区分）；过滤器一旦含非 octet-stream 类型（如 application/zip），.vrm 可能不可选 —— 用 `["*;所有文件;*"]` 强制 `*/*`。**换模型最稳通道 =「文件夹导入」扫描**
+- **重要反馈必须走顶部 toast**：侧边栏是长滚动列表，底部 `_status` 用户看不到；`_show_status` 已联动顶部提示条，新功能用 `_notify(msg, true)` 保证可见
 - 运行时加载 gwen 会打 3 条 "Morph target bind is null" 警告（addon 已知 FIXME），不影响功能
 - `user://*.vrm` 用 `VrmLoader.load_vrm()` 加载；`res://` 已导入模型直接 `load()` 拿 PackedScene
