@@ -25,8 +25,9 @@ func speak(text: String) -> void:
 	if not enabled or text.strip_edges() == "":
 		return
 	var p = _get_plug()
-	if p != null and p.has_method("ttsSpeak"):
+	if p != null:
 		p.ttsSpeak(text)
+		print("[TTS] plugin-speak ", text.length())
 		_speaking = true
 		_speak_time = Time.get_ticks_msec()
 		set_process(true)
@@ -51,7 +52,7 @@ func stop() -> void:
 	if not _speaking:
 		return
 	var p = _get_plug()
-	if p != null and p.has_method("ttsStop"):
+	if p != null:
 		p.ttsStop()
 	DisplayServer.tts_stop()
 	_speaking = false
@@ -71,7 +72,7 @@ func _process(_delta: float) -> void:
 	var elapsed := Time.get_ticks_msec() - _speak_time
 	var spk := DisplayServer.tts_is_speaking()
 	var p = _get_plug()
-	if p != null and p.has_method("ttsIsSpeaking"):
+	if p != null:
 		spk = bool(p.ttsIsSpeaking())
 	if elapsed > 400 and not spk:
 		_speaking = false

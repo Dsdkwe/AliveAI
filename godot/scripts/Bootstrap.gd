@@ -1541,21 +1541,16 @@ func _tick_ar(delta: float) -> void:
 	if _ar_quad == null:
 		return
 	if _ar_use_ext:
-		if _ar_plugin.has_method("getExtV2Err"):
-			var ve := String(_ar_plugin.getExtV2Err())
-			if ve != "":
+		var ve := String(_ar_plugin.getExtV2Err())
+		if ve != "":
 				_ar_prefer_ext = false
 				_ar_reset()
 				_show_status("AR:直通初始化失败（" + ve + "）→ 已切回兼容模式")
 				return
 		var ef := _ar_ext_seen
-		if _ar_plugin.has_method("getExtImgCount"):
-			ef = int(_ar_plugin.getExtImgCount())
-		elif _ar_plugin.has_method("getExtInFrames"):
-			ef = int(_ar_plugin.getExtInFrames())
-		if _ar_plugin.has_method("takeExtImage"):
-			var im := int(_ar_plugin.takeExtImage())
-			if im != 0 and _ar_ext != null:
+		ef = int(_ar_plugin.getExtImgCount())
+		var im := int(_ar_plugin.takeExtImage())
+		if im != 0 and _ar_ext != null:
 				_ar_ext.size = Vector2(float(_ar_plugin.getPreviewWidth()), float(_ar_plugin.getPreviewHeight()))
 				_ar_ext.set_external_buffer_id(im)
 				_ar_last_frame_ms = Time.get_ticks_msec()
