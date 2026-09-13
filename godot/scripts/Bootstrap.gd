@@ -109,6 +109,8 @@ var _ar_retry := 0
 var _ar_ok := false
 var _ar_denied_shown := false
 var _ar_diag_sent := false
+var _ar_crop_img_aspect := -1.0
+var _ar_crop_scr_aspect := -1.0
 const AR_BG_DIST := 30.0
 var _sidebar_scroll: ScrollContainer = null
 var _sb_touch_idx := -1
@@ -1479,6 +1481,7 @@ func _tick_ar(delta: float) -> void:
 				_ar_img.rotate_180()
 			elif rot == 270:
 				_ar_img.rotate_90(ClockDirection.COUNTERCLOCKWISE)
+			_update_ar_crop()
 			if _ar_tex == null:
 				_ar_tex = ImageTexture.create_from_image(_ar_img)
 				_ar_mat.albedo_texture = _ar_tex
@@ -1499,6 +1502,30 @@ func _tick_ar(delta: float) -> void:
 			var info := str(_ar_plugin.getDebugInfo())
 			_chat_append("系统", "AR诊断：" + info, "#9fd0ff")
 			_show_status("AR:始终无画面，诊断信息已发到聊天框")
+
+func _update_ar_crop() -> void:
+	if _ar_img == null or _ar_mat == null:
+		return
+	var iw := float(_ar_img.get_width())
+	var ih := float(_ar_img.get_height())
+	if iw <= 0.0 or ih <= 0.0:
+		return
+	var vs := get_viewport().get_visible_rect().size
+	var screen_aspect := vs.x / maxf(vs.y, 1.0)
+	var img_aspect := iw / maxf(ih, 1.0)
+	if absf(img_aspect - _ar_crop_img_aspect) < 0.001 and absf(screen_aspect - _ar_crop_scr_aspect) < 0.001:
+		return
+	_ar_crop_img_aspect = img_aspect
+	_ar_crop_scr_aspect = screen_aspect
+	if img_aspect > screen_aspect:
+		var sx := screen_aspect / img_aspect
+		_ar_mat.uv1_scale = Vector3(sx, 1.0, 1.0)
+		_ar_mat.uv1_offset = Vector3((1.0 - sx) * 0.5, 0.0, 0.0)
+	else:
+		var sy := img_aspect / screen_aspect
+		_ar_mat.uv1_scale = Vector3(1.0, sy, 1.0)
+		_ar_mat.uv1_offset = Vector3(0.0, (1.0 - sy) * 0.5, 0.0)
+	print("[AR] crop img=", img_aspect, " scr=", screen_aspect)
 
 func _build_ar_bg() -> void:
 	if _ar_quad != null or _cam == null:

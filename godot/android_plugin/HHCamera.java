@@ -3,6 +3,7 @@ package com.hta.halfhearted;
 import android.graphics.ImageFormat;
 import android.graphics.Rect;
 import android.graphics.YuvImage;
+import android.app.Activity;
 import android.hardware.Camera;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -29,6 +30,7 @@ public class HHCamera extends GodotPlugin {
 	private Handler camHandler = null;
 	private final AtomicReference<byte[]> latestJpeg = new AtomicReference<>();
 	private volatile int rotationDegrees = 90;
+	private volatile int sensorOrientation = 90;
 	private volatile int frameCount = 0;
 	private volatile boolean wantActive = false;
 	private long lastProcMs = 0;
@@ -79,7 +81,7 @@ private void openCamera() {
 			Camera.getCameraInfo(i, info);
 			if (info.facing == Camera.CameraInfo.CAMERA_FACING_BACK) {
 				camId = i;
-				rotationDegrees = info.orientation;
+				sensorOrientation = info.orientation;
 				break;
 			}
 		}
@@ -88,6 +90,16 @@ private void openCamera() {
 			return;
 		}
 		dbg = dbg + "|opening#" + camId;
+		int dispRot = 0;
+		try {
+			Activity act = getActivity();
+			if (act != null) {
+				dispRot = act.getWindowManager().getDefaultDisplay().getRotation() * 90;
+			}
+		} catch (Throwable ignored) {
+		}
+		rotationDegrees = (sensorOrientation - dispRot + 360) % 360;
+		dbg = dbg + "|rot=" + rotationDegrees;
 		final Camera c = Camera.open(camId);
 		if (c == null) {
 			dbg = dbg + "|open_null";
@@ -107,10 +119,19 @@ private void openCamera() {
 		List<Camera.Size> sizes = params.getSupportedPreviewSizes();
 		Camera.Size best = null;
 		for (Camera.Size s : sizes) {
-			if (s.width <= 1280) {
-				if (best == null || (long) s.width * s.height > (long) best.width * best.height) {
-					best = s;
-				}
+			if (s.width > 1920) {
+				continue;
+			}
+			boolean wide = ((double) s.width / s.height) > 1.55;
+			if (best == null) {
+				best = s;
+				continue;
+			}
+			boolean bestWide = ((double) best.width / best.height) > 1.55;
+			long area = (long) s.width * s.height;
+			long bestArea = (long) best.width * best.height;
+			if ((wide && !bestWide) || (wide == bestWide && area > bestArea)) {
+				best = s;
 			}
 		}
 		if (best != null) {
@@ -198,10 +219,20 @@ private void openCamera() {
 						lastProcMs = now;
 						YuvImage yuv = new YuvImage(data, yuvFmt, fw, fh, null);
 						ByteArrayOutputStream os = new ByteArrayOutputStream();
-						yuv.compressToJpeg(new Rect(0, 0, fw, fh), 60, os);
+						yuv.compressToJpeg(new Rect(0, 0, fw, fh), 80, os);
 						latestJpeg.set(os.toByteArray());
 						jpgCount++;
 						frameCount++;
+						if (frameCount % 120 == 0) {
+							try {
+								Activity act = getActivity();
+								if (act != null) {
+									int dr = act.getWindowManager().getDefaultDisplay().getRotation() * 90;
+									rotationDegrees = (sensorOrientation - dr + 360) % 360;
+								}
+							} catch (Throwable ignored) {
+							}
+						}
 						if (jpgCount == 1) {
 							dbg = dbg + "|jpg1";
 						}
