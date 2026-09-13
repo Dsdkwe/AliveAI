@@ -116,6 +116,9 @@ var _ar_last_reset_ms := 0
 var _ar_use_ext := false
 var _ar_ext = null
 var _ar_hq := true
+var _ar_prefer_ext := false
+var _ar_ext_seen := -1
+var _ar_ext_stall := 0.0
 const AR_ROLL_SIGN := -1.0
 const AR_BG_DIST := 30.0
 var _sidebar_scroll: ScrollContainer = null
@@ -1326,6 +1329,11 @@ func _setup_ui() -> void:
 	ar_hq_check.button_pressed = true
 	ar_hq_check.toggled.connect(_on_ar_hq_toggled)
 	vbox.add_child(ar_hq_check)
+	var ar_ext_check := CheckBox.new()
+	ar_ext_check.text = "AR 原生直通（实验；无数据自动回退）"
+	ar_ext_check.add_theme_font_size_override("font_size", 52)
+	ar_ext_check.toggled.connect(_on_ar_ext_toggled)
+	vbox.add_child(ar_ext_check)
 	var ar_reset_btn := Button.new()
 	ar_reset_btn.text = "AR 重置（重启相机）"
 	ar_reset_btn.add_theme_font_size_override("font_size", 52)
@@ -1460,6 +1468,15 @@ func _start_ar_camera() -> void:
 	_build_ar_bg()
 	if _ar_mat == null:
 		return
+	if not _ar_prefer_ext:
+		_ar_use_ext = false
+		_ar_ext = null
+		_ar_ext_seen = -1
+		_ar_ext_stall = 0.0
+		_ar_plugin.start()
+		_show_status("AR:相机已启动（兼容模式），等待画面…")
+		print("[AR] compat(jpeg) mode start")
+		return
 	var ext_ok := false
 	if _ar_ext == null:
 		_ar_ext = ExternalTexture.new()
@@ -1473,18 +1490,20 @@ func _start_ar_camera() -> void:
 			ext_ok = true
 	if ext_ok:
 		_ar_use_ext = true
+		_ar_ext_seen = -1
+		_ar_ext_stall = 0.0
 		_ar_mat.albedo_texture = _ar_ext
 		if _ar_quad:
 			_ar_quad.visible = true
 		_ar_ok = true
 		_ar_last_frame_ms = Time.get_ticks_msec()
-		_show_status("AR:相机已启动（原生直通）")
+		_show_status("AR:相机已启动（原生直通·实验）")
 		print("[AR] external texture mode tid=", tid)
 	else:
 		_ar_use_ext = false
 		_ar_ext = null
 		_ar_plugin.start()
-		_show_status("AR:相机已启动，等待画面…")
+		_show_status("AR:相机已启动（兼容模式），等待画面…")
 
 func _restart_ar_camera() -> void:
 	_ar_retry += 1
@@ -1511,8 +1530,21 @@ func _tick_ar(delta: float) -> void:
 	if _ar_quad == null:
 		return
 	if _ar_use_ext:
-		if _ar_ok:
+		var ef := _ar_ext_seen
+		if _ar_plugin.has_method("getExtInFrames"):
+			ef = int(_ar_plugin.getExtInFrames())
+		if _ar_ext_seen < 0 or ef != _ar_ext_seen:
+			_ar_ext_seen = ef
+			_ar_ext_stall = 0.0
 			_ar_last_frame_ms = Time.get_ticks_msec()
+		else:
+			_ar_ext_stall += delta
+			if _ar_ext_stall > 3.0 and _ar_ok:
+				_ar_prefer_ext = false
+				_ar_reset()
+				_show_status("AR:直通无数据源→已切换兼容模式重试…")
+				print("[AR] ext no frames, fallback to compat")
+				return
 		var ct2 := _cam.global_transform
 		var roll_ang := deg_to_rad(int(_ar_plugin.getRotationDegrees()))
 		var bb := ct2.basis * Basis(Vector3(0.0, 0.0, 1.0), AR_ROLL_SIGN * roll_ang)
@@ -1541,7 +1573,7 @@ func _tick_ar(delta: float) -> void:
 				_ar_quad.visible = true
 				_ar_ok = true
 				_ar_last_frame_ms = Time.get_ticks_msec()
-				_show_status("AR:画面已接通")
+				_show_status("AR:画面已接通（兼容模式）")
 				print("[AR] first frame ok")
 			else:
 				_ar_tex.update(_ar_img)
@@ -1560,6 +1592,12 @@ func _tick_ar(delta: float) -> void:
 	if _ar_ok and _ar_last_frame_ms > 0 and Time.get_ticks_msec() - _ar_last_frame_ms > 4000 and Time.get_ticks_msec() - _ar_last_reset_ms > 8000:
 		_ar_reset()
 
+func _on_ar_ext_toggled(on: bool) -> void:
+	_ar_prefer_ext = on
+	if _ar_plugin != null:
+		_ar_reset()
+	_show_status("AR:直通模式" + ("开启" if on else "关闭") + "，正在重连相机…")
+
 func _on_ar_hq_toggled(on: bool) -> void:
 	_ar_hq = on
 	if _ar_plugin != null:
@@ -1573,6 +1611,8 @@ func _ar_reset() -> void:
 	_ar_ok = false
 	_ar_tex = null
 	_ar_use_ext = false
+	_ar_ext_seen = -1
+	_ar_ext_stall = 0.0
 	_ar_pending = true
 	_ar_wait = 0.0
 	_ar_start_ms = 0

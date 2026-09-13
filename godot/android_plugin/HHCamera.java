@@ -60,6 +60,7 @@ public class HHCamera extends GodotPlugin {
 	private long lastProcMs = 0;
 	private volatile int cbCount = 0;
 	private volatile int jpgCount = 0;
+	private volatile int extInFrames = 0;
 	private volatile String dbg = "init";
 	private SurfaceTexture dummySt = null;
 
@@ -75,6 +76,8 @@ public class HHCamera extends GodotPlugin {
 	@UsedByGodot
 	public void start() {
 		dbg = "init";
+		externalMode = false;
+		extInFrames = 0;
 		synchronized (lock) {
 			if (camera != null) {
 				return;
@@ -244,6 +247,12 @@ private void openCamera() {
 				lastPreviewHeight = se.height;
 				extSt = new SurfaceTexture(externalTexId);
 				extSt.setDefaultBufferSize(se.width, se.height);
+				extSt.setOnFrameAvailableListener(new SurfaceTexture.OnFrameAvailableListener() {
+					@Override
+					public void onFrameAvailable(SurfaceTexture st) {
+						extInFrames++;
+					}
+				});
 				c.setPreviewTexture(extSt);
 				c.startPreview();
 				dbg = dbg + "|ext " + se.width + "x" + se.height;
@@ -374,6 +383,7 @@ private void openCamera() {
 		synchronized (lock) {
 			externalMode = true;
 			externalTexId = texId;
+			extInFrames = 0;
 			if (reqW > 0) {
 				extReqW = reqW;
 			}
@@ -395,7 +405,7 @@ private void openCamera() {
 
 	@UsedByGodot
 	public String getDebugInfo() {
-		return dbg + " cb=" + cbCount + " jpg=" + jpgCount + " act=" + (camera != null);
+		return dbg + " cb=" + cbCount + " jpg=" + jpgCount + " extIn=" + extInFrames + " act=" + (camera != null);
 	}
 
 	@UsedByGodot
@@ -411,6 +421,10 @@ private void openCamera() {
 	@UsedByGodot
 	public int getFrameCount() {
 		return frameCount;
+	}
+	@UsedByGodot
+	public int getExtInFrames() {
+		return extInFrames;
 	}
 
 	@UsedByGodot
