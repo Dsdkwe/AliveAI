@@ -15,20 +15,21 @@ var enabled := true
 
 var _voice := ""
 var _speaking := false
-var _checked := false
+var _last_warn_ms := 0
+var _last_voice_count := -1
 var _speak_time := 0
 var _zh_voice_hint := ""
 
 func speak(text: String) -> void:
 	if not enabled or text.strip_edges() == "":
 		return
-	if not _checked:
-		_checked = true
-		_refresh_voice()
 	if _voice == "":
 		_refresh_voice()
 	if _voice == "":
-		tts_unavailable.emit("设备未检测到可用的 TTS 语音引擎" + _zh_voice_hint)
+		var now := Time.get_ticks_msec()
+		if now - _last_warn_ms > 30000:
+			_last_warn_ms = now
+			tts_unavailable.emit("设备未检测到可用的 TTS语音引擎（voices=%d），下次回复会自动重试" % _last_voice_count + _zh_voice_hint)
 		return
 	DisplayServer.tts_stop()
 	DisplayServer.tts_speak(text, _voice, VOICE_VOLUME, VOICE_PITCH, VOICE_RATE, 0, true)
@@ -63,24 +64,18 @@ func _process(_delta: float) -> void:
 
 func _refresh_voice() -> void:
 	var voices := DisplayServer.tts_get_voices()
+	_last_voice_count = voices.size()
 	var zh := ""
-	var zh_any := ""
 	for v in voices:
+		var blob := str(v).to_lower()
 		var id := str(v.get("id", ""))
-		var lang := str(v.get("language", "")).to_lower()
-		var name := str(v.get("name", "")).to_lower()
-		if lang.begins_with("zh") or name.find("chinese") >= 0 or name.find("中文") >= 0:
-			if lang.find("cn") >= 0 or lang.find("hans") >= 0 or name.find("chinese") >= 0:
-				if zh == "":
-					zh = id
-			if zh_any == "":
-				zh_any = id
+		var is_zh := blob.find("zh") >= 0 or blob.find("cmn") >= 0 or blob.find("chi") >= 0 or blob.find("chinese") >= 0 or blob.find("中文") >= 0
+		if is_zh and zh == "":
+			zh = id
 	if zh != "":
 		_voice = zh
-	elif zh_any != "":
-		_voice = zh_any
+		_zh_voice_hint = ""
 	elif voices.size() > 0:
 		_voice = str(voices[0].get("id", ""))
-	if zh == "" and voices.size() > 0:
-		_zh_voice_hint = "（未找到中文语音，可到系统设置安装中文 TTS 数据）"
+		_zh_voice_hint = "（未找到中文语音，可到系统设置里安装/启用中文 TTS）"
 	print("[TTS] voices=", voices.size(), " picked=", _voice)

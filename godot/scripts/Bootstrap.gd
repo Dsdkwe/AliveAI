@@ -103,6 +103,11 @@ var _ar_mat: StandardMaterial3D = null
 var _ar_quad: MeshInstance3D = null
 var _ar_pending := false
 var _ar_wait := 0.0
+var _ar_req_count := 0
+var _ar_start_ms := 0
+var _ar_retry := 0
+var _ar_ok := false
+var _ar_denied_shown := false
 const AR_BG_DIST := 30.0
 var _sidebar_scroll: ScrollContainer = null
 var _sb_touch_idx := -1
@@ -963,11 +968,7 @@ func _on_speech_finished() -> void:
 
 func _on_tts_unavailable(msg: String) -> void:
 	_chat_append("系统", msg, "#ff9f9f")
-	if _tts_check:
-		_tts_check.button_pressed = false
-	if _brain:
-		_brain.tts_enabled = false
-		_brain.save_settings()
+	print("[TTS] unavailable:", msg)
 
 func _on_save_settings() -> void:
 	if _brain == null:
@@ -1417,35 +1418,53 @@ func _setup_ar() -> void:
 		_ar_plugin = Engine.get_singleton("HHCamera")
 		_ar_pending = true
 		_ar_wait = 0.0
-		var granted := OS.get_granted_permissions()
-		if not granted.has("android.permission.CAMERA"):
-			OS.request_permissions()
+		_request_camera_permission()
 		print("[AR] plugin found, waiting for camera permission")
 	else:
 		print("[AR] plugin not found (desktop / non-plugin build) - dark background")
+		_show_status("AR:插件未加载（深色背景）")
+
+func _camera_granted() -> bool:
+	return OS.get_granted_permissions().has("android.permission.CAMERA")
+
+func _request_camera_permission() -> void:
+	_ar_req_count += 1
+	OS.request_permission("android.permission.CAMERA")
+	_show_status("AR:请在弹窗里点「允许使用相机」(%d/3)" % _ar_req_count)
+
+func _start_ar_camera() -> void:
+	_ar_start_ms = Time.get_ticks_msec()
+	_ar_plugin.start()
+	_build_ar_bg()
+	_show_status("AR:相机已启动，等待画面…")
+
+func _restart_ar_camera() -> void:
+	_ar_retry += 1
+	_ar_plugin.stop()
+	_start_ar_camera()
+	_show_status("AR:无画面，重试相机(%d/2)…" % _ar_retry)
 
 func _tick_ar(delta: float) -> void:
 	if _ar_plugin == null:
 		return
 	if _ar_pending:
 		_ar_wait += delta
-		if _ar_wait < 1.2:
+		if not _camera_granted():
+			if _ar_wait >= 4.0 and _ar_req_count < 3:
+				_ar_wait = 0.0
+				_request_camera_permission()
+			elif _ar_wait >= 6.0 and not _ar_denied_shown:
+				_ar_denied_shown = true
+				_show_status("AR:尚未获得相机权限（去系统设置里允许相机即可，无需重装）")
 			return
 		_ar_pending = false
-		var granted := OS.get_granted_permissions()
-		if granted.has("android.permission.CAMERA"):
-			_ar_plugin.start()
-			_build_ar_bg()
-			print("[AR] camera started")
-		else:
-			print("[AR] camera permission not granted")
-		return
+		_start_ar_camera()
+		print("[AR] camera start requested")
 	if _ar_quad == null:
 		return
-	# 背景画面跟随相机（充当“现实”背景板）
+	#background 跟随相机
 	var ct := _cam.global_transform
 	_ar_quad.global_transform = Transform3D(ct.basis, ct.origin - ct.basis.z * AR_BG_DIST)
-	# 拉取最新相机帧（JPEG）
 	var jpg = _ar_plugin.poll()
 	if jpg != null and jpg.size() > 200:
 		if _ar_img == null:
@@ -1462,8 +1481,15 @@ func _tick_ar(delta: float) -> void:
 				_ar_tex = ImageTexture.create_from_image(_ar_img)
 				_ar_mat.albedo_texture = _ar_tex
 				_ar_quad.visible = true
+				_ar_ok = true
+				_show_status("AR:画面已接通")
+				print("[AR] first frame ok")
 			else:
 				_ar_tex.update(_ar_img)
+	elif not _ar_ok and _ar_start_ms > 0:
+		var since := Time.get_ticks_msec() - _ar_start_ms
+		if since > 10000 and _ar_retry < 2:
+			_restart_ar_camera()
 
 func _build_ar_bg() -> void:
 	if _ar_quad != null or _cam == null:

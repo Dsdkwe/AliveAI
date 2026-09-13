@@ -87,17 +87,21 @@ def main():
     manifest = os.path.join(BUILD_DIR, "AndroidManifest.xml")
     with open(manifest, "r", encoding="utf-8") as f:
         text = f.read()
-    if "org.godotengine.plugin.v1.HHCamera" in text:
-        print("[inject] meta-data already present")
-    else:
+    if "org.godotengine.plugin.v1.HHCamera" not in text:
         m = re.search(r"<application\b[^>]*>", text)
         if not m:
             raise SystemExit("[inject] <application> tag not found in AndroidManifest.xml")
         meta = '\n        <meta-data android:name="org.godotengine.plugin.v1.HHCamera" android:value="com.hta.halfhearted.HHCamera" />'
         text = text[:m.end()] + meta + text[m.end():]
-        with open(manifest, "w", encoding="utf-8") as f:
-            f.write(text)
         print("[inject] HHCamera meta-data injected")
+    else:
+        print("[inject] meta-data already present")
+    if "intent.action.TTS_SERVICE" not in text:
+        tts_q = '\n  <queries>\n    <intent>\n      <action android:name="android.intent.action.TTS_SERVICE" />\n    </intent>\n  </queries>\n'
+        text = text.replace("</manifest>", tts_q + "</manifest>")
+        print("[inject] TTS query added")
+    with open(manifest, "w", encoding="utf-8") as f:
+        f.write(text)
     print("[inject] done")
 
 

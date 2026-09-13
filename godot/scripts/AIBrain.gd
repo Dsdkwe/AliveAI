@@ -99,9 +99,13 @@ func load_settings() -> void:
 		api_key = str(d.get("api_key", api_key))
 		persona = str(d.get("persona", persona))
 		tts_enabled = bool(d.get("tts_enabled", tts_enabled))
+		if not bool(d.get("tts_fix2", false)):
+			# one-time migration: restore tts_enabled
+			tts_enabled = true
+			save_settings()
 
 func save_settings() -> void:
-	var d := {"base_url": base_url, "model": model, "api_key": api_key, "persona": persona, "tts_enabled": tts_enabled}
+	var d := {"base_url": base_url, "model": model, "api_key": api_key, "persona": persona, "tts_enabled": tts_enabled, "tts_fix2": true}
 	var f := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(d, " "))
