@@ -161,7 +161,7 @@ private void openCamera() {
 		}
 		Camera.Parameters params = c.getParameters();
 		List<Camera.Size> sizes = params.getSupportedPreviewSizes();
-		int maxW = externalMode ? extReqW : (highQuality ? 3840 : 1920);
+		int maxW = externalMode ? extReqW : (highQuality ? 3840 : 1280);
 		Camera.Size best = null;
 		for (Camera.Size s : sizes) {
 			if (s.width > maxW) {
@@ -181,6 +181,13 @@ private void openCamera() {
 		}
 		if (best != null) {
 			params.setPreviewSize(best.width, best.height);
+		}
+		{
+			StringBuilder sb = new StringBuilder();
+			for (Camera.Size s : sizes) {
+				sb.append(s.width).append("x").append(s.height).append(",");
+			}
+			Log.i("HHCamera", "sizes=" + sb.toString() + " chosen=" + (best != null ? (best.width + "x" + best.height) : "none") + " maxW=" + maxW);
 		}
 		try {
 			List<Integer> fmts = params.getSupportedPreviewFormats();
@@ -207,6 +214,7 @@ private void openCamera() {
 				}
 				if (bestR != null) {
 					params.setPreviewFpsRange(bestR[0], bestR[1]);
+					Log.i("HHCamera", "fpsRange=" + bestR[0] + "-" + bestR[1]);
 				}
 			} catch (Throwable t) {
 				dbg = dbg + "|fps2E:" + t.getClass().getSimpleName();
@@ -298,6 +306,7 @@ private void openCamera() {
 		}
 		final int bufSize = fw * fh * bpp / 8;
 		dbg = dbg + "|sz " + fw + "x" + fh + " f=" + actualFmt + " bpp=" + bpp;
+		Log.i("HHCamera", "sz=" + fw + "x" + fh + " f=" + actualFmt);
 		final Camera.PreviewCallback frameCb = new Camera.PreviewCallback() {
 			@Override
 			public void onPreviewFrame(byte[] data, Camera cam) {
@@ -316,7 +325,7 @@ private void openCamera() {
 						if (latestJpeg.get() == null) {
 							YuvImage yuv = new YuvImage(data, yuvFmt, fw, fh, null);
 							ByteArrayOutputStream os = new ByteArrayOutputStream();
-							yuv.compressToJpeg(new Rect(0, 0, fw, fh), highQuality ? 80 : 70, os);
+							yuv.compressToJpeg(new Rect(0, 0, fw, fh), highQuality ? 80 : 62, os);
 							latestJpeg.set(os.toByteArray());
 							jpgCount++;
 						}
