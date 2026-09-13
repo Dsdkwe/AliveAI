@@ -124,15 +124,53 @@ public class HHCamera extends GodotPlugin {
 			} catch (Throwable t) {
 				dbg = "fmtE:" + t.getClass().getSimpleName();
 			}
+			String note = "";
+			boolean applied = false;
 			try {
-				params.setPreviewFpsRange(15000, 30000);
-			} catch (Throwable ignored) {
+				c.setParameters(params);
+				applied = true;
+				note = "ok1";
+			} catch (Throwable t1) {
+				note = "1E:" + t1.getMessage();
 			}
-			c.setParameters(params);
+			if (!applied) {
+				try {
+					Camera.Parameters p2 = c.getParameters();
+					if (best != null) {
+						p2.setPreviewSize(best.width, best.height);
+					}
+					c.setParameters(p2);
+					applied = true;
+					note = note + "|ok2";
+				} catch (Throwable t2) {
+					note = note + "|2E:" + t2.getMessage();
+				}
+			}
+			if (!applied) {
+				try {
+					Camera.Parameters p3 = c.getParameters();
+					Camera.Size small = null;
+					for (Camera.Size s3 : p3.getSupportedPreviewSizes()) {
+						if (s3.width <= 640) {
+							if (small == null || (long) s3.width * s3.height > (long) small.width * small.height) {
+								small = s3;
+							}
+						}
+					}
+					if (small != null) {
+						p3.setPreviewSize(small.width, small.height);
+					}
+					c.setParameters(p3);
+					applied = true;
+					note = note + "|ok3";
+				} catch (Throwable t3) {
+					note = note + "|3E:" + t3.getMessage();
+				}
+			}
 			Camera.Size sz = c.getParameters().getPreviewSize();
 			final int fw = sz.width;
 			final int fh = sz.height;
-			dbg = "cfg " + fw + "x" + fh + " f=" + c.getParameters().getPreviewFormat();
+			dbg = "setp[" + note + "] " + fw + "x" + fh + " f=" + c.getParameters().getPreviewFormat();
 			int bufSize = fw * fh * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8;
 			c.addCallbackBuffer(new byte[bufSize]);
 			c.addCallbackBuffer(new byte[bufSize]);
