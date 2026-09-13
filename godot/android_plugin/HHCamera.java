@@ -344,6 +344,14 @@ private void openCamera() {
 				}
 			}
 		};
+		try {
+			dummySt = new SurfaceTexture(0);
+			dummySt.setDefaultBufferSize(fw, fh);
+			c.setPreviewTexture(dummySt);
+			dbg = dbg + "|dummy0";
+		} catch (Throwable t) {
+			dbg = dbg + "|dummyE";
+		}
 		c.setPreviewCallbackWithBuffer(frameCb);
 		c.addCallbackBuffer(new byte[bufSize]);
 		c.addCallbackBuffer(new byte[bufSize]);
