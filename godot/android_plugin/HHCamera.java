@@ -163,19 +163,30 @@ private void openCamera() {
 		List<Camera.Size> sizes = params.getSupportedPreviewSizes();
 		int maxW = externalMode ? extReqW : (highQuality ? 3840 : 1280);
 		Camera.Size best = null;
+		double scrAsp = 2.222;
+		try {
+			Activity actA = getActivity();
+			if (actA != null) {
+				android.graphics.Point p = new android.graphics.Point();
+				actA.getWindowManager().getDefaultDisplay().getRealSize(p);
+				int sm = Math.max(p.x, p.y);
+				int sn = Math.min(p.x, p.y);
+				if (sn > 0) {
+					scrAsp = (double) sm / sn;
+				}
+			}
+		} catch (Throwable ignored) {
+		}
+		double bestScore = -1.0;
 		for (Camera.Size s : sizes) {
 			if (s.width > maxW) {
 				continue;
 			}
-			boolean wide = ((double) s.width / s.height) > 1.55;
-			if (best == null) {
-				best = s;
-				continue;
-			}
-			boolean bestWide = ((double) best.width / best.height) > 1.55;
+			double diff = Math.abs(((double) s.width / s.height) - scrAsp);
 			long area = (long) s.width * s.height;
-			long bestArea = (long) best.width * best.height;
-			if ((wide && !bestWide) || (wide == bestWide && area > bestArea)) {
+			double score = area / (1.0 + 8.0 * diff);
+			if (score > bestScore) {
+				bestScore = score;
 				best = s;
 			}
 		}
