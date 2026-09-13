@@ -64,18 +64,27 @@ def main():
     print("[inject] using template:", zip_path)
     extract_template(zip_path, BUILD_DIR)
 
+    # 写入 .build_version 与 .gdignore（编辑器安装模板的固定行为；缺少 .build_version 时 gradle 导出会被拒绝）
+    os.makedirs(os.path.dirname(BUILD_DIR), exist_ok=True)
+    version = os.path.basename(os.path.dirname(zip_path))
+    with open(os.path.join(os.path.dirname(BUILD_DIR), ".build_version"), "w", encoding="utf-8") as f:
+        f.write(version + "\n")
+    with open(os.path.join(BUILD_DIR, ".gdignore"), "w", encoding="utf-8") as f:
+        f.write("\n")
+    print("[inject] .build_version =", version)
+
     gradlew = os.path.join(BUILD_DIR, "gradlew")
     if os.path.exists(gradlew):
         os.chmod(gradlew, os.stat(gradlew).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
     # 1) 注入 Java 源码
-    src_dir = os.path.join(BUILD_DIR, "src", "main", "java", "com", "hta", "halfhearted")
+    src_dir = os.path.join(BUILD_DIR, "src", "com", "hta", "halfhearted")
     os.makedirs(src_dir, exist_ok=True)
     shutil.copy(os.path.join(PLUGIN_DIR, "HHCamera.java"), os.path.join(src_dir, "HHCamera.java"))
     print("[inject] HHCamera.java ->", src_dir)
 
     # 2) 注入插件注册 meta-data
-    manifest = os.path.join(BUILD_DIR, "src", "main", "AndroidManifest.xml")
+    manifest = os.path.join(BUILD_DIR, "AndroidManifest.xml")
     with open(manifest, "r", encoding="utf-8") as f:
         text = f.read()
     if "org.godotengine.plugin.v1.HHCamera" in text:
