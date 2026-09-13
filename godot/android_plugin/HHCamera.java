@@ -161,7 +161,7 @@ private void openCamera() {
 		}
 		Camera.Parameters params = c.getParameters();
 		List<Camera.Size> sizes = params.getSupportedPreviewSizes();
-		int maxW = externalMode ? extReqW : (highQuality ? 1920 : 1280);
+		int maxW = externalMode ? extReqW : (highQuality ? 3840 : 1920);
 		Camera.Size best = null;
 		for (Camera.Size s : sizes) {
 			if (s.width > maxW) {
@@ -316,7 +316,7 @@ private void openCamera() {
 						if (latestJpeg.get() == null) {
 							YuvImage yuv = new YuvImage(data, yuvFmt, fw, fh, null);
 							ByteArrayOutputStream os = new ByteArrayOutputStream();
-							yuv.compressToJpeg(new Rect(0, 0, fw, fh), highQuality ? 76 : 66, os);
+							yuv.compressToJpeg(new Rect(0, 0, fw, fh), highQuality ? 80 : 70, os);
 							latestJpeg.set(os.toByteArray());
 							jpgCount++;
 						}

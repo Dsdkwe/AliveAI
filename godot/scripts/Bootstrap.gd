@@ -1327,20 +1327,20 @@ func _setup_ui() -> void:
 	_tts_check.toggled.connect(_on_tts_toggled)
 	vbox.add_child(_tts_check)
 	var ar_hq_check := CheckBox.new()
-	ar_hq_check.text = "AR 高清模式（1080p；关闭=更流畅）"
+	ar_hq_check.text = "AR 高清模式（最高4K；关闭=更流畅）"
 	ar_hq_check.add_theme_font_size_override("font_size", 52)
 	ar_hq_check.button_pressed = true
 	ar_hq_check.toggled.connect(_on_ar_hq_toggled)
 	vbox.add_child(ar_hq_check)
 	var ar_ext_check := CheckBox.new()
-	ar_ext_check.text = "AR 原生直通（实验；无数据自动回退）"
+	ar_ext_check.text = "AR 原生直通（实验，本机可能不支持）"
 	ar_ext_check.add_theme_font_size_override("font_size", 52)
 	ar_ext_check.toggled.connect(_on_ar_ext_toggled)
 	vbox.add_child(ar_ext_check)
 	var ar_reset_btn := Button.new()
 	ar_reset_btn.text = "AR 重置（重启相机）"
 	ar_reset_btn.add_theme_font_size_override("font_size", 52)
-	ar_reset_btn.pressed.connect(_ar_reset)
+	ar_reset_btn.pressed.connect(_on_ar_reset_pressed)
 	vbox.add_child(ar_reset_btn)
 
 	_clear_btn = Button.new()
@@ -1623,7 +1623,13 @@ func _on_ar_hq_toggled(on: bool) -> void:
 	if _ar_plugin != null:
 		_ar_plugin.setHighQuality(on)
 		_ar_reset()
-	_show_status("AR:已选" + ("1080p 高清" if on else "720p 流畅") + "，正在重连相机…")
+	_show_status("AR:已选" + ("高清模式" if on else "流畅模式") + "，正在重连相机…")
+
+func _on_ar_reset_pressed() -> void:
+	if _ar_prefer_ext:
+		_ar_prefer_ext = false
+		_show_status("AR:已切回兼容模式并重置相机…")
+	_ar_reset()
 
 func _ar_reset() -> void:
 	if _ar_plugin == null:
