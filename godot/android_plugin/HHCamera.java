@@ -601,21 +601,6 @@ private void openCamera() {
 	}
 
 	@Override
-	public void onMainResume() {
-		super.onMainResume();
-		if (tts == null || !ttsReady) {
-			ensureTts();
-		} else {
-			try {
-				tts.getVoices();
-			} catch (Throwable t) {
-				destroyTts();
-				ensureTts();
-			}
-		}
-	}
-
-	@Override
 	public void onMainDestroy() {
 		destroyTts();
 		super.onMainDestroy();
@@ -767,6 +752,16 @@ private void openCamera() {
 		synchronized (lock) {
 			if (wantActive && camera == null) {
 				startInternalLocked();
+			}
+		}
+		if (tts == null || !ttsReady) {
+			ensureTts();
+		} else {
+			try {
+				tts.getVoices();
+			} catch (Throwable t) {
+				destroyTts();
+				ensureTts();
 			}
 		}
 	}
