@@ -312,9 +312,16 @@ private void openCamera() {
 					@Override
 					public void onFrameAvailable(SurfaceTexture st) {
 						extInFrames++;
+					if (extInFrames == 1) {
+						Log.i("HHCamera", "extV2 cb1");
+					}
 					grabExtFrame(st);
 					}
 				});
+				try {
+					c.stopPreview();
+				} catch (Throwable t) {
+				}
 				c.setPreviewTexture(extSt);
 				c.startPreview();
 				dbg = dbg + "|ext " + se.width + "x" + se.height;
