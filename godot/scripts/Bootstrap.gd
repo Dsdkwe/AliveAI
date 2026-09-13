@@ -1500,7 +1500,7 @@ func _start_ar_camera() -> void:
 			_ar_quad.visible = true
 		_ar_ok = true
 		_ar_last_frame_ms = Time.get_ticks_msec()
-		_show_status("AR:相机已启动（原生直通·实验）")
+		_show_status("AR:相机已启动（原生直通 实验）")
 		print("[AR] external texture mode tid=", tid)
 	else:
 		_ar_use_ext = false
@@ -1511,8 +1511,14 @@ func _start_ar_camera() -> void:
 func _restart_ar_camera() -> void:
 	_ar_retry += 1
 	_ar_plugin.stop()
-	_start_ar_camera()
-	_show_status("AR:无画面，重试相机(%d/2)…" % _ar_retry)
+	_ar_use_ext = false
+	if _ar_retry >= 2 and _ar_prefer_ext:
+		_ar_prefer_ext = false
+		_show_status("AR:直通无画面，已切回兼容模式重试…")
+	else:
+		_show_status("AR:无画面，深度重试相机(%d/2)…" % _ar_retry)
+	_ar_pending = true
+	_ar_wait = -1.5
 
 func _tick_ar(delta: float) -> void:
 	if _ar_plugin == null:
@@ -1547,7 +1553,7 @@ func _tick_ar(delta: float) -> void:
 			if _ar_ext_stall > 3.0 and _ar_ok:
 				_ar_prefer_ext = false
 				_ar_reset()
-				_show_status("AR:直通无数据源→已切换兼容模式重试…")
+				_show_status("AR:直通无数据源，已自动切回兼容模式…")
 				print("[AR] ext no frames, fallback to compat")
 				return
 		var ct2 := _cam.global_transform
@@ -1586,15 +1592,15 @@ func _tick_ar(delta: float) -> void:
 				_ar_last_frame_ms = Time.get_ticks_msec()
 	elif not _ar_ok and _ar_start_ms > 0:
 		var since := Time.get_ticks_msec() - _ar_start_ms
-		if since > 9000 and _ar_retry < 1:
+		if since > 6000 and _ar_retry < 1:
 			_restart_ar_camera()
-		elif since > 18000 and _ar_retry < 2:
+		elif since > 13000 and _ar_retry < 2:
 			_restart_ar_camera()
 		elif since > 26000 and not _ar_diag_sent:
 			_ar_diag_sent = true
 			var info := str(_ar_plugin.getDebugInfo())
 			_chat_append("系统", "AR诊断：" + info, "#9fd0ff")
-			_show_status("AR:始终无画面，诊断信息已发到聊天框")
+			_show_status("AR:始终无画面，已深度重试；仍不行请大退一次App（诊断已发聊天框）")
 	_ar_hud_t += delta
 	if _ar_hud_t >= 2.0 and _ar_ok and _status != null:
 		_ar_hud_t = 0.0
@@ -1610,7 +1616,7 @@ func _on_ar_ext_toggled(on: bool) -> void:
 	_ar_prefer_ext = on
 	if _ar_plugin != null:
 		_ar_reset()
-	_show_status("AR:直通模式" + ("开启" if on else "关闭") + "，正在重连相机…")
+	_show_status("AR:直通(实验)" + ("开启，画面异常请关闭此开关" if on else "已关闭") + "，正在重连相机…")
 
 func _on_ar_hq_toggled(on: bool) -> void:
 	_ar_hq = on
@@ -1629,7 +1635,7 @@ func _ar_reset() -> void:
 	_ar_ext_seen = -1
 	_ar_ext_stall = 0.0
 	_ar_pending = true
-	_ar_wait = -0.7
+	_ar_wait = -1.2
 	_ar_start_ms = 0
 	_ar_retry = 0
 	_ar_diag_sent = false

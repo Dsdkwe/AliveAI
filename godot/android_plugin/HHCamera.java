@@ -9,6 +9,7 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.graphics.SurfaceTexture;
 import android.os.SystemClock;
+import android.util.Log;
 
 import org.godotengine.godot.Godot;
 import org.godotengine.godot.plugin.GodotPlugin;
@@ -50,9 +51,14 @@ public class HHCamera extends GodotPlugin {
 				return;
 			}
 			try {
-				st.updateTexImage();
-			} catch (Throwable ignored) {
-			}
+					st.updateTexImage();
+					extUp++;
+				} catch (Throwable t) {
+					if (extErr.length() == 0) {
+						extErr = t.getClass().getSimpleName() + ":" + t.getMessage();
+						Log.e("HHCamera", "updateTexImage fail", t);
+					}
+				}
 		}
 	};
 	private volatile int frameCount = 0;
@@ -61,6 +67,8 @@ public class HHCamera extends GodotPlugin {
 	private volatile int cbCount = 0;
 	private volatile int jpgCount = 0;
 	private volatile int extInFrames = 0;
+	private volatile int extUp = 0;
+	private volatile String extErr = "";
 	private volatile int openTries = 0;
 	private volatile String dbg = "init";
 	private SurfaceTexture dummySt = null;
@@ -80,6 +88,9 @@ public class HHCamera extends GodotPlugin {
 		externalMode = false;
 		extInFrames = 0;
 		openTries = 0;
+		cbCount = 0;
+		jpgCount = 0;
+		frameCount = 0;
 		synchronized (lock) {
 			if (camera != null) {
 				return;
@@ -98,7 +109,7 @@ public class HHCamera extends GodotPlugin {
 			public void run() {
 				openCamera();
 			}
-		}, 300);
+		}, 600);
 	}
 
 private void openCamera() {
@@ -120,6 +131,7 @@ private void openCamera() {
 			return;
 		}
 		dbg = dbg + "|opening#" + camId;
+		Log.i("HHCamera", "opening cam#" + camId);
 		int dispRot = 0;
 		try {
 			Activity act = getActivity();
@@ -244,6 +256,7 @@ private void openCamera() {
 			}
 		}
 		dbg = dbg + "|setp[" + note + "]";
+		Log.i("HHCamera", "open ok rot=" + rotationDegrees + " " + note);
 		if (externalMode) {
 			try {
 				Camera.Parameters pe = c.getParameters();
@@ -261,6 +274,7 @@ private void openCamera() {
 				c.setPreviewTexture(extSt);
 				c.startPreview();
 				dbg = dbg + "|ext " + se.width + "x" + se.height;
+				Log.i("HHCamera", "ext attach " + se.width + "x" + se.height);
 				startExtPump();
 			} catch (Throwable t) {
 				dbg = dbg + "|extE:" + t.getClass().getSimpleName() + ":" + t.getMessage();
@@ -294,6 +308,7 @@ private void openCamera() {
 					cbCount++;
 					if (cbCount == 1) {
 						dbg = dbg + "|cb1";
+						Log.i("HHCamera", "first callback");
 					}
 					long now = SystemClock.elapsedRealtime();
 					if (now - lastProcMs >= (highQuality ? 33 : 16)) {
@@ -374,6 +389,7 @@ private void openCamera() {
 		}, 7500);
 	} catch (Throwable t) {
 		dbg = dbg + "|E:" + t.getClass().getSimpleName() + ":" + t.getMessage();
+		Log.e("HHCamera", "openCamera exception", t);
 		synchronized (lock) {
 			releaseCamera();
 		}
@@ -410,7 +426,7 @@ private void openCamera() {
 
 	@UsedByGodot
 	public String getDebugInfo() {
-		return dbg + " cb=" + cbCount + " jpg=" + jpgCount + " extIn=" + extInFrames + " act=" + (camera != null);
+		return dbg + " cb=" + cbCount + " jpg=" + jpgCount + " extIn=" + extInFrames + " extUp=" + extUp + " extE=" + extErr + " act=" + (camera != null);
 	}
 
 	@UsedByGodot
@@ -441,6 +457,7 @@ private void openCamera() {
 	public void stop() {
 		synchronized (lock) {
 			wantActive = false;
+			Log.i("HHCamera", "stop()");
 			releaseCamera();
 		}
 	}
@@ -461,7 +478,7 @@ private void openCamera() {
 						openCamera();
 					}
 				}
-			}, 700);
+			}, 800);
 		}
 	}
 	private void releaseCamera() {
