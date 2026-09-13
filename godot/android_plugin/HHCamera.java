@@ -8,7 +8,6 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.graphics.SurfaceTexture;
 import android.os.SystemClock;
-import android.view.Surface;
 
 import org.godotengine.godot.Godot;
 import org.godotengine.godot.plugin.GodotPlugin;
@@ -37,7 +36,6 @@ public class HHCamera extends GodotPlugin {
 	private volatile int jpgCount = 0;
 	private volatile String dbg = "init";
 	private SurfaceTexture dummySt = null;
-	private Surface dummySf = null;
 
 	public HHCamera(Godot godot) {
 		super(godot);
@@ -249,8 +247,7 @@ private void openCamera() {
 						c.stopPreview();
 						dummySt = new SurfaceTexture(0);
 						dummySt.setDefaultBufferSize(fw, fh);
-						dummySf = new Surface(dummySt);
-						c.setPreviewDisplay(dummySf);
+						c.setPreviewTexture(dummySt);
 						c.setPreviewCallbackWithBuffer(frameCb);
 						c.addCallbackBuffer(new byte[bufSize]);
 						c.addCallbackBuffer(new byte[bufSize]);
