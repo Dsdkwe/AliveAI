@@ -61,6 +61,7 @@ public class HHCamera extends GodotPlugin {
 	private volatile int cbCount = 0;
 	private volatile int jpgCount = 0;
 	private volatile int extInFrames = 0;
+	private volatile int openTries = 0;
 	private volatile String dbg = "init";
 	private SurfaceTexture dummySt = null;
 
@@ -78,6 +79,7 @@ public class HHCamera extends GodotPlugin {
 		dbg = "init";
 		externalMode = false;
 		extInFrames = 0;
+		openTries = 0;
 		synchronized (lock) {
 			if (camera != null) {
 				return;
@@ -91,12 +93,12 @@ public class HHCamera extends GodotPlugin {
 		camThread = new HandlerThread("HHCamera");
 		camThread.start();
 		camHandler = new Handler(camThread.getLooper());
-		camHandler.post(new Runnable() {
+		camHandler.postDelayed(new Runnable() {
 			@Override
 			public void run() {
 				openCamera();
 			}
-		});
+		}, 300);
 	}
 
 private void openCamera() {
@@ -114,6 +116,7 @@ private void openCamera() {
 		}
 		if (camId < 0) {
 			dbg = dbg + "|no_cam n=" + n;
+			retryOpen();
 			return;
 		}
 		dbg = dbg + "|opening#" + camId;
@@ -130,6 +133,7 @@ private void openCamera() {
 		final Camera c = Camera.open(camId);
 		if (c == null) {
 			dbg = dbg + "|open_null";
+			retryOpen();
 			return;
 		}
 		synchronized (lock) {
@@ -141,6 +145,7 @@ private void openCamera() {
 				return;
 			}
 			camera = c;
+			openTries = 0;
 		}
 		Camera.Parameters params = c.getParameters();
 		List<Camera.Size> sizes = params.getSupportedPreviewSizes();
@@ -175,7 +180,7 @@ private void openCamera() {
 		} catch (Throwable t) {
 			dbg = dbg + "|fmtE:" + t.getClass().getSimpleName();
 		}
-		if (externalMode) {
+		{
 			try {
 				List<int[]> rng2 = params.getSupportedPreviewFpsRange();
 				int[] bestR = null;
@@ -296,7 +301,7 @@ private void openCamera() {
 						if (latestJpeg.get() == null) {
 							YuvImage yuv = new YuvImage(data, yuvFmt, fw, fh, null);
 							ByteArrayOutputStream os = new ByteArrayOutputStream();
-							yuv.compressToJpeg(new Rect(0, 0, fw, fh), highQuality ? 80 : 70, os);
+							yuv.compressToJpeg(new Rect(0, 0, fw, fh), highQuality ? 76 : 66, os);
 							latestJpeg.set(os.toByteArray());
 							jpgCount++;
 						}
@@ -440,6 +445,25 @@ private void openCamera() {
 		}
 	}
 
+	private void retryOpen() {
+		openTries++;
+		if (openTries > 2 || !wantActive) {
+			dbg = dbg + "|giveup";
+			return;
+		}
+		dbg = dbg + "|retry" + openTries;
+		final Handler h = camHandler;
+		if (h != null) {
+			h.postDelayed(new Runnable() {
+				@Override
+				public void run() {
+					if (wantActive && camera == null) {
+						openCamera();
+					}
+				}
+			}, 700);
+		}
+	}
 	private void releaseCamera() {
 		try {
 			if (camera != null) {
@@ -463,6 +487,19 @@ private void openCamera() {
 		} catch (Throwable ignored) {
 		}
 		extSt = null;
+		try {
+			if (dummySt != null) {
+				dummySt.release();
+			}
+		} catch (Throwable ignored) {
+		}
+		dummySt = null;
+		if (camHandler != null) {
+			try {
+				camHandler.removeCallbacksAndMessages(null);
+			} catch (Throwable ignored) {
+			}
+		}
 		if (camThread != null) {
 			try {
 				camThread.quitSafely();

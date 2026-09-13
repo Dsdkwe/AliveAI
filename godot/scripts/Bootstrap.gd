@@ -119,6 +119,9 @@ var _ar_hq := true
 var _ar_prefer_ext := false
 var _ar_ext_seen := -1
 var _ar_ext_stall := 0.0
+var _ar_fc := 0
+var _ar_hud_t := 0.0
+var _ar_fps := 0.0
 const AR_ROLL_SIGN := -1.0
 const AR_BG_DIST := 30.0
 var _sidebar_scroll: ScrollContainer = null
@@ -1524,6 +1527,8 @@ func _tick_ar(delta: float) -> void:
 				_ar_denied_shown = true
 				_show_status("AR:尚未获得相机权限（去系统设置里允许相机即可，无需重装）")
 			return
+		if _ar_wait < 0.0:
+			return
 		_ar_pending = false
 		_start_ar_camera()
 		print("[AR] camera start requested")
@@ -1559,6 +1564,7 @@ func _tick_ar(delta: float) -> void:
 		if _ar_img == null:
 			_ar_img = Image.new()
 		if _ar_img.load_jpg_from_buffer(jpg) == OK:
+			_ar_fc += 1
 			var rot := int(_ar_plugin.getRotationDegrees())
 			if rot == 90:
 				_ar_img.rotate_90(ClockDirection.CLOCKWISE)
@@ -1589,6 +1595,14 @@ func _tick_ar(delta: float) -> void:
 			var info := str(_ar_plugin.getDebugInfo())
 			_chat_append("系统", "AR诊断：" + info, "#9fd0ff")
 			_show_status("AR:始终无画面，诊断信息已发到聊天框")
+	_ar_hud_t += delta
+	if _ar_hud_t >= 2.0 and _ar_ok and _status != null:
+		_ar_hud_t = 0.0
+		_ar_fps = _ar_fc / 2.0
+		_ar_fc = 0
+		var pw := int(_ar_plugin.getPreviewWidth())
+		var ph := int(_ar_plugin.getPreviewHeight())
+		_status.text = "AR:%dx%d %.0f fps（%s）" % [pw, ph, _ar_fps, ("兼容" if not _ar_use_ext else "直通")]
 	if _ar_ok and _ar_last_frame_ms > 0 and Time.get_ticks_msec() - _ar_last_frame_ms > 4000 and Time.get_ticks_msec() - _ar_last_reset_ms > 8000:
 		_ar_reset()
 
@@ -1602,7 +1616,8 @@ func _on_ar_hq_toggled(on: bool) -> void:
 	_ar_hq = on
 	if _ar_plugin != null:
 		_ar_plugin.setHighQuality(on)
-	_ar_reset()
+		_ar_reset()
+	_show_status("AR:已选" + ("1080p 高清" if on else "720p 流畅") + "，正在重连相机…")
 
 func _ar_reset() -> void:
 	if _ar_plugin == null:
@@ -1614,7 +1629,7 @@ func _ar_reset() -> void:
 	_ar_ext_seen = -1
 	_ar_ext_stall = 0.0
 	_ar_pending = true
-	_ar_wait = 0.0
+	_ar_wait = -0.7
 	_ar_start_ms = 0
 	_ar_retry = 0
 	_ar_diag_sent = false
