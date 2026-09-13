@@ -32,6 +32,29 @@ public class HHCamera extends GodotPlugin {
 	private volatile int rotationDegrees = 90;
 	private volatile int sensorOrientation = 90;
 	private volatile boolean highQuality = true;
+	private volatile boolean externalMode = false;
+	private volatile int externalTexId = 0;
+	private volatile int extReqW = 1920;
+	private volatile int extReqH = 1080;
+	private volatile SurfaceTexture extSt = null;
+	private volatile boolean extPump = false;
+	private volatile int lastPreviewWidth = 0;
+	private volatile int lastPreviewHeight = 0;
+	private HandlerThread pumpThread = null;
+	private Handler pumpHandler = null;
+	private final Runnable extUpdateTask = new Runnable() {
+		@Override
+		public void run() {
+			SurfaceTexture st = extSt;
+			if (st == null) {
+				return;
+			}
+			try {
+				st.updateTexImage();
+			} catch (Throwable ignored) {
+			}
+		}
+	};
 	private volatile int frameCount = 0;
 	private volatile boolean wantActive = false;
 	private long lastProcMs = 0;
@@ -118,7 +141,7 @@ private void openCamera() {
 		}
 		Camera.Parameters params = c.getParameters();
 		List<Camera.Size> sizes = params.getSupportedPreviewSizes();
-		int maxW = highQuality ? 1920 : 1280;
+		int maxW = externalMode ? extReqW : (highQuality ? 1920 : 1280);
 		Camera.Size best = null;
 		for (Camera.Size s : sizes) {
 			if (s.width > maxW) {
@@ -148,6 +171,26 @@ private void openCamera() {
 			}
 		} catch (Throwable t) {
 			dbg = dbg + "|fmtE:" + t.getClass().getSimpleName();
+		}
+		if (externalMode) {
+			try {
+				List<int[]> rng2 = params.getSupportedPreviewFpsRange();
+				int[] bestR = null;
+				if (rng2 != null) {
+					for (int[] r : rng2) {
+						if (r[1] <= 60000) {
+							if (bestR == null || r[1] > bestR[1] || (r[1] == bestR[1] && r[0] > bestR[0])) {
+								bestR = r;
+							}
+						}
+					}
+				}
+				if (bestR != null) {
+					params.setPreviewFpsRange(bestR[0], bestR[1]);
+				}
+			} catch (Throwable t) {
+				dbg = dbg + "|fps2E:" + t.getClass().getSimpleName();
+			}
 		}
 		String note = "";
 		boolean applied = false;
@@ -193,10 +236,32 @@ private void openCamera() {
 			}
 		}
 		dbg = dbg + "|setp[" + note + "]";
+		if (externalMode) {
+			try {
+				Camera.Parameters pe = c.getParameters();
+				Camera.Size se = pe.getPreviewSize();
+				lastPreviewWidth = se.width;
+				lastPreviewHeight = se.height;
+				extSt = new SurfaceTexture(externalTexId);
+				extSt.setDefaultBufferSize(se.width, se.height);
+				c.setPreviewTexture(extSt);
+				c.startPreview();
+				dbg = dbg + "|ext " + se.width + "x" + se.height;
+				startExtPump();
+			} catch (Throwable t) {
+				dbg = dbg + "|extE:" + t.getClass().getSimpleName() + ":" + t.getMessage();
+				synchronized (lock) {
+					releaseCamera();
+				}
+			}
+			return;
+		}
 		Camera.Parameters pActual = c.getParameters();
 		Camera.Size sz = pActual.getPreviewSize();
 		final int fw = sz.width;
 		final int fh = sz.height;
+		lastPreviewWidth = fw;
+		lastPreviewHeight = fh;
 		int actualFmt = pActual.getPreviewFormat();
 		final int yuvFmt = (actualFmt == ImageFormat.NV21 || actualFmt == ImageFormat.YUY2) ? actualFmt : ImageFormat.NV21;
 		int bpp = ImageFormat.getBitsPerPixel(yuvFmt);
@@ -302,6 +367,28 @@ private void openCamera() {
 }
 
 	@UsedByGodot
+	public boolean startExternal(int texId, int reqW, int reqH) {
+		if (texId == 0) {
+			return false;
+		}
+		synchronized (lock) {
+			externalMode = true;
+			externalTexId = texId;
+			if (reqW > 0) {
+				extReqW = reqW;
+			}
+			if (reqH > 0) {
+				extReqH = reqH;
+			}
+			wantActive = true;
+			if (camera == null) {
+				startInternalLocked();
+			}
+		}
+		return true;
+	}
+
+	@UsedByGodot
 	public void setHighQuality(boolean hq) {
 		highQuality = hq;
 	}
@@ -354,6 +441,14 @@ private void openCamera() {
 		} catch (Throwable ignored) {
 		}
 		camera = null;
+		stopExtPump();
+		try {
+			if (extSt != null) {
+				extSt.release();
+			}
+		} catch (Throwable ignored) {
+		}
+		extSt = null;
 		if (camThread != null) {
 			try {
 				camThread.quitSafely();
@@ -362,6 +457,61 @@ private void openCamera() {
 			camThread = null;
 			camHandler = null;
 		}
+	}
+
+	private void startExtPump() {
+		stopExtPump();
+		extPump = true;
+		pumpThread = new HandlerThread("HHCameraGL");
+		pumpThread.start();
+		pumpHandler = new Handler(pumpThread.getLooper());
+		final Runnable tick = new Runnable() {
+			@Override
+			public void run() {
+				if (!extPump) {
+					return;
+				}
+				try {
+					getGodot().runOnRenderThread(extUpdateTask);
+				} catch (Throwable ignored) {
+				}
+				Handler h = pumpHandler;
+				if (h != null) {
+					h.postDelayed(this, 16);
+				}
+			}
+		};
+		pumpHandler.post(tick);
+	}
+
+	private void stopExtPump() {
+		extPump = false;
+		Handler h = pumpHandler;
+		pumpHandler = null;
+		try {
+			if (h != null) {
+				h.removeCallbacksAndMessages(null);
+			}
+		} catch (Throwable ignored) {
+		}
+		HandlerThread th = pumpThread;
+		pumpThread = null;
+		try {
+			if (th != null) {
+				th.quitSafely();
+			}
+		} catch (Throwable ignored) {
+		}
+	}
+
+	@UsedByGodot
+	public int getPreviewWidth() {
+		return lastPreviewWidth;
+	}
+
+	@UsedByGodot
+	public int getPreviewHeight() {
+		return lastPreviewHeight;
 	}
 
 	@Override

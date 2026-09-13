@@ -113,6 +113,10 @@ var _ar_crop_img_aspect := -1.0
 var _ar_crop_scr_aspect := -1.0
 var _ar_last_frame_ms := 0
 var _ar_last_reset_ms := 0
+var _ar_use_ext := false
+var _ar_ext = null
+var _ar_hq := true
+const AR_ROLL_SIGN := -1.0
 const AR_BG_DIST := 30.0
 var _sidebar_scroll: ScrollContainer = null
 var _sb_touch_idx := -1
@@ -1453,9 +1457,34 @@ func _request_camera_permission() -> void:
 func _start_ar_camera() -> void:
 	if _ar_start_ms == 0:
 		_ar_start_ms = Time.get_ticks_msec()
-	_ar_plugin.start()
 	_build_ar_bg()
-	_show_status("AR:相机已启动，等待画面…")
+	if _ar_mat == null:
+		return
+	var ext_ok := false
+	if _ar_ext == null:
+		_ar_ext = ExternalTexture.new()
+		_ar_ext.size = Vector2(1920.0, 1080.0)
+	var tid := int(_ar_ext.get_external_texture_id())
+	if tid != 0:
+		var req_w := 1920 if _ar_hq else 1280
+		var req_h := 1080 if _ar_hq else 720
+		var ok_ext = _ar_plugin.startExternal(tid, req_w, req_h)
+		if bool(ok_ext):
+			ext_ok = true
+	if ext_ok:
+		_ar_use_ext = true
+		_ar_mat.albedo_texture = _ar_ext
+		if _ar_quad:
+			_ar_quad.visible = true
+		_ar_ok = true
+		_ar_last_frame_ms = Time.get_ticks_msec()
+		_show_status("AR:相机已启动（原生直通）")
+		print("[AR] external texture mode tid=", tid)
+	else:
+		_ar_use_ext = false
+		_ar_ext = null
+		_ar_plugin.start()
+		_show_status("AR:相机已启动，等待画面…")
 
 func _restart_ar_camera() -> void:
 	_ar_retry += 1
@@ -1480,6 +1509,15 @@ func _tick_ar(delta: float) -> void:
 		_start_ar_camera()
 		print("[AR] camera start requested")
 	if _ar_quad == null:
+		return
+	if _ar_use_ext:
+		if _ar_ok:
+			_ar_last_frame_ms = Time.get_ticks_msec()
+		var ct2 := _cam.global_transform
+		var roll_ang := deg_to_rad(int(_ar_plugin.getRotationDegrees()))
+		var bb := ct2.basis * Basis(Vector3(0.0, 0.0, 1.0), AR_ROLL_SIGN * roll_ang)
+		_ar_quad.global_transform = Transform3D(bb, ct2.origin - ct2.basis.z * AR_BG_DIST)
+		_update_ar_crop()
 		return
 	#background 跟随相机
 	var ct := _cam.global_transform
@@ -1523,6 +1561,7 @@ func _tick_ar(delta: float) -> void:
 		_ar_reset()
 
 func _on_ar_hq_toggled(on: bool) -> void:
+	_ar_hq = on
 	if _ar_plugin != null:
 		_ar_plugin.setHighQuality(on)
 	_ar_reset()
@@ -1533,6 +1572,7 @@ func _ar_reset() -> void:
 	_ar_last_reset_ms = Time.get_ticks_msec()
 	_ar_ok = false
 	_ar_tex = null
+	_ar_use_ext = false
 	_ar_pending = true
 	_ar_wait = 0.0
 	_ar_start_ms = 0
@@ -1545,28 +1585,43 @@ func _ar_reset() -> void:
 	_show_status("AR:已重置，重新连接相机…")
 
 func _update_ar_crop() -> void:
-	if _ar_img == null or _ar_mat == null:
+	if _ar_mat == null:
 		return
-	var iw := float(_ar_img.get_width())
-	var ih := float(_ar_img.get_height())
+	var iw := 0.0
+	var ih := 0.0
+	var rot := 0
+	if _ar_use_ext:
+		iw = float(_ar_plugin.getPreviewWidth())
+		ih = float(_ar_plugin.getPreviewHeight())
+		rot = int(_ar_plugin.getRotationDegrees())
+	elif _ar_img != null:
+		iw = float(_ar_img.get_width())
+		ih = float(_ar_img.get_height())
 	if iw <= 0.0 or ih <= 0.0:
 		return
+	var swap := (rot % 180) != 0
+	var dw := ih if swap else iw
+	var dh := iw if swap else ih
 	var vs := get_viewport().get_visible_rect().size
 	var screen_aspect := vs.x / maxf(vs.y, 1.0)
-	var img_aspect := iw / maxf(ih, 1.0)
-	if absf(img_aspect - _ar_crop_img_aspect) < 0.001 and absf(screen_aspect - _ar_crop_scr_aspect) < 0.001:
+	var disp_aspect := dw / maxf(dh, 1.0)
+	if absf(disp_aspect - _ar_crop_img_aspect) < 0.001 and absf(screen_aspect - _ar_crop_scr_aspect) < 0.001:
 		return
-	_ar_crop_img_aspect = img_aspect
+	_ar_crop_img_aspect = disp_aspect
 	_ar_crop_scr_aspect = screen_aspect
-	if img_aspect > screen_aspect:
-		var sx := screen_aspect / img_aspect
-		_ar_mat.uv1_scale = Vector3(sx, 1.0, 1.0)
-		_ar_mat.uv1_offset = Vector3((1.0 - sx) * 0.5, 0.0, 0.0)
+	var cx := 1.0
+	var cy := 1.0
+	if disp_aspect > screen_aspect:
+		cx = screen_aspect / disp_aspect
 	else:
-		var sy := img_aspect / screen_aspect
-		_ar_mat.uv1_scale = Vector3(1.0, sy, 1.0)
-		_ar_mat.uv1_offset = Vector3(0.0, (1.0 - sy) * 0.5, 0.0)
-	print("[AR] crop img=", img_aspect, " scr=", screen_aspect)
+		cy = disp_aspect / screen_aspect
+	if swap:
+		_ar_mat.uv1_scale = Vector3(cy, cx, 1.0)
+		_ar_mat.uv1_offset = Vector3((1.0 - cy) * 0.5, (1.0 - cx) * 0.5, 0.0)
+	else:
+		_ar_mat.uv1_scale = Vector3(cx, cy, 1.0)
+		_ar_mat.uv1_offset = Vector3((1.0 - cx) * 0.5, (1.0 - cy) * 0.5, 0.0)
+	print("[AR] crop disp=", disp_aspect, " scr=", screen_aspect)
 
 func _build_ar_bg() -> void:
 	if _ar_quad != null or _cam == null:
