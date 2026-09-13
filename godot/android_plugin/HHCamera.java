@@ -31,6 +31,7 @@ public class HHCamera extends GodotPlugin {
 	private final AtomicReference<byte[]> latestJpeg = new AtomicReference<>();
 	private volatile int rotationDegrees = 90;
 	private volatile int sensorOrientation = 90;
+	private volatile boolean highQuality = true;
 	private volatile int frameCount = 0;
 	private volatile boolean wantActive = false;
 	private long lastProcMs = 0;
@@ -117,9 +118,10 @@ private void openCamera() {
 		}
 		Camera.Parameters params = c.getParameters();
 		List<Camera.Size> sizes = params.getSupportedPreviewSizes();
+		int maxW = highQuality ? 1920 : 1280;
 		Camera.Size best = null;
 		for (Camera.Size s : sizes) {
-			if (s.width > 1920) {
+			if (s.width > maxW) {
 				continue;
 			}
 			boolean wide = ((double) s.width / s.height) > 1.55;
@@ -215,13 +217,15 @@ private void openCamera() {
 						dbg = dbg + "|cb1";
 					}
 					long now = SystemClock.elapsedRealtime();
-					if (now - lastProcMs >= 33) {
+					if (now - lastProcMs >= (highQuality ? 33 : 16)) {
 						lastProcMs = now;
-						YuvImage yuv = new YuvImage(data, yuvFmt, fw, fh, null);
-						ByteArrayOutputStream os = new ByteArrayOutputStream();
-						yuv.compressToJpeg(new Rect(0, 0, fw, fh), 80, os);
-						latestJpeg.set(os.toByteArray());
-						jpgCount++;
+						if (latestJpeg.get() == null) {
+							YuvImage yuv = new YuvImage(data, yuvFmt, fw, fh, null);
+							ByteArrayOutputStream os = new ByteArrayOutputStream();
+							yuv.compressToJpeg(new Rect(0, 0, fw, fh), highQuality ? 80 : 70, os);
+							latestJpeg.set(os.toByteArray());
+							jpgCount++;
+						}
 						frameCount++;
 						if (frameCount % 120 == 0) {
 							try {
@@ -296,6 +300,11 @@ private void openCamera() {
 		}
 	}
 }
+
+	@UsedByGodot
+	public void setHighQuality(boolean hq) {
+		highQuality = hq;
+	}
 
 	@UsedByGodot
 	public String getDebugInfo() {

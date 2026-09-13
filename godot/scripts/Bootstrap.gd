@@ -111,6 +111,8 @@ var _ar_denied_shown := false
 var _ar_diag_sent := false
 var _ar_crop_img_aspect := -1.0
 var _ar_crop_scr_aspect := -1.0
+var _ar_last_frame_ms := 0
+var _ar_last_reset_ms := 0
 const AR_BG_DIST := 30.0
 var _sidebar_scroll: ScrollContainer = null
 var _sb_touch_idx := -1
@@ -141,6 +143,8 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_IN:
 		if _scan_box != null:
 			_refresh_folder_models()
+		if _ar_plugin != null and not _ar_plugin.isActive():
+			_ar_reset()
 
 func _process(_delta: float) -> void:
 	if _downloading and _dl_http and _dl_label:
@@ -1312,6 +1316,17 @@ func _setup_ui() -> void:
 	_tts_check.button_pressed = _brain.tts_enabled if _brain else true
 	_tts_check.toggled.connect(_on_tts_toggled)
 	vbox.add_child(_tts_check)
+	var ar_hq_check := CheckBox.new()
+	ar_hq_check.text = "AR 高清模式（1080p；关闭=更流畅）"
+	ar_hq_check.add_theme_font_size_override("font_size", 52)
+	ar_hq_check.button_pressed = true
+	ar_hq_check.toggled.connect(_on_ar_hq_toggled)
+	vbox.add_child(ar_hq_check)
+	var ar_reset_btn := Button.new()
+	ar_reset_btn.text = "AR 重置（重启相机）"
+	ar_reset_btn.add_theme_font_size_override("font_size", 52)
+	ar_reset_btn.pressed.connect(_ar_reset)
+	vbox.add_child(ar_reset_btn)
 
 	_clear_btn = Button.new()
 	_clear_btn.text = "清空对话记忆"
@@ -1487,10 +1502,12 @@ func _tick_ar(delta: float) -> void:
 				_ar_mat.albedo_texture = _ar_tex
 				_ar_quad.visible = true
 				_ar_ok = true
+				_ar_last_frame_ms = Time.get_ticks_msec()
 				_show_status("AR:画面已接通")
 				print("[AR] first frame ok")
 			else:
 				_ar_tex.update(_ar_img)
+				_ar_last_frame_ms = Time.get_ticks_msec()
 	elif not _ar_ok and _ar_start_ms > 0:
 		var since := Time.get_ticks_msec() - _ar_start_ms
 		if since > 9000 and _ar_retry < 1:
@@ -1502,6 +1519,30 @@ func _tick_ar(delta: float) -> void:
 			var info := str(_ar_plugin.getDebugInfo())
 			_chat_append("系统", "AR诊断：" + info, "#9fd0ff")
 			_show_status("AR:始终无画面，诊断信息已发到聊天框")
+	if _ar_ok and _ar_last_frame_ms > 0 and Time.get_ticks_msec() - _ar_last_frame_ms > 4000 and Time.get_ticks_msec() - _ar_last_reset_ms > 8000:
+		_ar_reset()
+
+func _on_ar_hq_toggled(on: bool) -> void:
+	if _ar_plugin != null:
+		_ar_plugin.setHighQuality(on)
+	_ar_reset()
+
+func _ar_reset() -> void:
+	if _ar_plugin == null:
+		return
+	_ar_last_reset_ms = Time.get_ticks_msec()
+	_ar_ok = false
+	_ar_tex = null
+	_ar_pending = true
+	_ar_wait = 0.0
+	_ar_start_ms = 0
+	_ar_retry = 0
+	_ar_diag_sent = false
+	_ar_denied_shown = false
+	if _ar_quad:
+		_ar_quad.visible = false
+	_ar_plugin.stop()
+	_show_status("AR:已重置，重新连接相机…")
 
 func _update_ar_crop() -> void:
 	if _ar_img == null or _ar_mat == null:
