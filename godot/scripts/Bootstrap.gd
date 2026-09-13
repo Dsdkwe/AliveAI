@@ -1542,8 +1542,15 @@ func _tick_ar(delta: float) -> void:
 		return
 	if _ar_use_ext:
 		var ef := _ar_ext_seen
-		if _ar_plugin.has_method("getExtInFrames"):
+		if _ar_plugin.has_method("getExtImgCount"):
+			ef = int(_ar_plugin.getExtImgCount())
+		elif _ar_plugin.has_method("getExtInFrames"):
 			ef = int(_ar_plugin.getExtInFrames())
+		if _ar_plugin.has_method("takeExtImage"):
+			var im := int(_ar_plugin.takeExtImage())
+			if im != 0 and _ar_ext != null:
+				_ar_ext.size = Vector2(float(_ar_plugin.getPreviewWidth()), float(_ar_plugin.getPreviewHeight()))
+				_ar_ext.set_external_buffer_id(im)
 		if _ar_ext_seen < 0 or ef != _ar_ext_seen:
 			_ar_ext_seen = ef
 			_ar_ext_stall = 0.0

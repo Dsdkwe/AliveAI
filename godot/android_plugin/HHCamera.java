@@ -13,6 +13,9 @@ import android.util.Log;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import java.util.Locale;
+import android.opengl.EGL14;
+import android.opengl.EGLExt;
+import android.hardware.HardwareBuffer;
 
 import org.godotengine.godot.Godot;
 import org.godotengine.godot.plugin.GodotPlugin;
@@ -77,6 +80,11 @@ public class HHCamera extends GodotPlugin {
 	private volatile boolean ttsSpeaking = false;
 	private volatile String ttsPending = null;
 	private volatile int ttsGen = 0;
+	private volatile long extImage = 0;
+	private volatile long extImgCount = 0;
+	private long extImgPrev1 = 0;
+	private long extImgPrev2 = 0;
+	private volatile String extV2Err = "";
 	private volatile int openTries = 0;
 	private volatile String dbg = "init";
 	private SurfaceTexture dummySt = null;
@@ -300,19 +308,20 @@ private void openCamera() {
 				Camera.Size se = pe.getPreviewSize();
 				lastPreviewWidth = se.width;
 				lastPreviewHeight = se.height;
-				extSt = new SurfaceTexture(externalTexId);
+				extSt = new SurfaceTexture(0);
 				extSt.setDefaultBufferSize(se.width, se.height);
 				extSt.setOnFrameAvailableListener(new SurfaceTexture.OnFrameAvailableListener() {
 					@Override
 					public void onFrameAvailable(SurfaceTexture st) {
 						extInFrames++;
+					grabExtFrame(st);
 					}
 				});
 				c.setPreviewTexture(extSt);
 				c.startPreview();
 				dbg = dbg + "|ext " + se.width + "x" + se.height;
 				Log.i("HHCamera", "ext attach " + se.width + "x" + se.height);
-				startExtPump();
+				/*v2-noop*/
 			} catch (Throwable t) {
 				dbg = dbg + "|extE:" + t.getClass().getSimpleName() + ":" + t.getMessage();
 				synchronized (lock) {
@@ -494,6 +503,82 @@ private void openCamera() {
 		return extInFrames;
 	}
 
+	// ===== 直通v2：硬件缓冲 → EGLImage → Godot外部纹理 =====
+	private void extDestroyImages() {
+		long a = extImage;
+		long b = extImgPrev1;
+		long c = extImgPrev2;
+		extImage = 0;
+		extImgPrev1 = 0;
+		extImgPrev2 = 0;
+		try {
+			android.opengl.EGLDisplay d = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
+			if (a != 0) {
+				EGLExt.eglDestroyImageKHR(d, a);
+			}
+			if (b != 0) {
+				EGLExt.eglDestroyImageKHR(d, b);
+			}
+			if (c != 0) {
+				EGLExt.eglDestroyImageKHR(d, c);
+			}
+		} catch (Throwable t) {
+		}
+	}
+
+	private void grabExtFrame(SurfaceTexture st) {
+		try {
+			HardwareBuffer hb = st.getHardwareBuffer();
+			if (hb == null) {
+				return;
+			}
+			long img = 0;
+			try {
+				img = EGLExt.eglCreateImageFromHardwareBuffer(EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY), hb);
+			} finally {
+				hb.close();
+			}
+			if (img != 0) {
+				long old2 = extImgPrev2;
+				extImgPrev2 = extImgPrev1;
+				extImgPrev1 = extImage;
+				extImage = img;
+				extImgCount++;
+				if (extImgCount <= 4 || extImgCount % 300 == 0) {
+					Log.i("HHCamera", "extV2 img n=" + extImgCount);
+				}
+				if (old2 != 0) {
+					try {
+						EGLExt.eglDestroyImageKHR(EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY), old2);
+					} catch (Throwable t2) {
+					}
+				}
+			} else {
+				extV2Err = "img0";
+			}
+		} catch (Throwable t) {
+			extV2Err = t.getClass().getSimpleName() + ":" + t.getMessage();
+			Log.w("HHCamera", "extV2 err: " + extV2Err);
+		}
+	}
+
+	@UsedByGodot
+	public long takeExtImage() {
+		long v = extImage;
+		extImage = 0;
+		return v;
+	}
+
+	@UsedByGodot
+	public long getExtImgCount() {
+		return extImgCount;
+	}
+
+	@UsedByGodot
+	public String getExtV2Err() {
+		return extV2Err;
+	}
+
 	// ===== 内置 TTS 桥（修复回前台无声）=====
 	private void destroyTts() {
 		try {
@@ -650,6 +735,7 @@ private void openCamera() {
 		}
 	}
 	private void releaseCamera() {
+		extDestroyImages();
 		try {
 			if (camera != null) {
 				camera.setPreviewCallbackWithBuffer(null);
