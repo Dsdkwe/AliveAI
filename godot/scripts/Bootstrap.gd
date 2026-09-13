@@ -108,6 +108,7 @@ var _ar_start_ms := 0
 var _ar_retry := 0
 var _ar_ok := false
 var _ar_denied_shown := false
+var _ar_diag_sent := false
 const AR_BG_DIST := 30.0
 var _sidebar_scroll: ScrollContainer = null
 var _sb_touch_idx := -1
@@ -1433,7 +1434,8 @@ func _request_camera_permission() -> void:
 	_show_status("AR:请在弹窗里点「允许使用相机」(%d/3)" % _ar_req_count)
 
 func _start_ar_camera() -> void:
-	_ar_start_ms = Time.get_ticks_msec()
+	if _ar_start_ms == 0:
+		_ar_start_ms = Time.get_ticks_msec()
 	_ar_plugin.start()
 	_build_ar_bg()
 	_show_status("AR:相机已启动，等待画面…")
@@ -1488,8 +1490,15 @@ func _tick_ar(delta: float) -> void:
 				_ar_tex.update(_ar_img)
 	elif not _ar_ok and _ar_start_ms > 0:
 		var since := Time.get_ticks_msec() - _ar_start_ms
-		if since > 10000 and _ar_retry < 2:
+		if since > 9000 and _ar_retry < 1:
 			_restart_ar_camera()
+		elif since > 18000 and _ar_retry < 2:
+			_restart_ar_camera()
+		elif since > 26000 and not _ar_diag_sent:
+			_ar_diag_sent = true
+			var info := str(_ar_plugin.getDebugInfo())
+			_chat_append("系统", "AR诊断：" + info, "#9fd0ff")
+			_show_status("AR:始终无画面，诊断信息已发到聊天框")
 
 func _build_ar_bg() -> void:
 	if _ar_quad != null or _cam == null:

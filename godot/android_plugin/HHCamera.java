@@ -31,6 +31,9 @@ public class HHCamera extends GodotPlugin {
 	private volatile int frameCount = 0;
 	private volatile boolean wantActive = false;
 	private long lastProcMs = 0;
+	private volatile int cbCount = 0;
+	private volatile int jpgCount = 0;
+	private volatile String dbg = "init";
 
 	public HHCamera(Godot godot) {
 		super(godot);
@@ -43,6 +46,7 @@ public class HHCamera extends GodotPlugin {
 
 	@UsedByGodot
 	public void start() {
+		dbg = "start_called";
 		synchronized (lock) {
 			if (camera != null) {
 				return;
@@ -78,10 +82,13 @@ public class HHCamera extends GodotPlugin {
 				}
 			}
 			if (camId < 0) {
+				dbg = "no_cam n=" + n;
 				return;
 			}
+			dbg = "opening#" + camId;
 			final Camera c = Camera.open(camId);
 			if (c == null) {
+				dbg = "open_null";
 				return;
 			}
 			synchronized (lock) {
@@ -107,7 +114,16 @@ public class HHCamera extends GodotPlugin {
 			if (best != null) {
 				params.setPreviewSize(best.width, best.height);
 			}
-			params.setPreviewFormat(ImageFormat.NV21);
+			try {
+				List<Integer> fmts = params.getSupportedPreviewFormats();
+				if (fmts != null && fmts.contains(ImageFormat.NV21)) {
+					params.setPreviewFormat(ImageFormat.NV21);
+				} else {
+					dbg = "fmt_no_nv21";
+				}
+			} catch (Throwable t) {
+				dbg = "fmtE:" + t.getClass().getSimpleName();
+			}
 			try {
 				params.setPreviewFpsRange(15000, 30000);
 			} catch (Throwable ignored) {
@@ -116,6 +132,7 @@ public class HHCamera extends GodotPlugin {
 			Camera.Size sz = c.getParameters().getPreviewSize();
 			final int fw = sz.width;
 			final int fh = sz.height;
+			dbg = "cfg " + fw + "x" + fh + " f=" + c.getParameters().getPreviewFormat();
 			int bufSize = fw * fh * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8;
 			c.addCallbackBuffer(new byte[bufSize]);
 			c.addCallbackBuffer(new byte[bufSize]);
@@ -126,6 +143,7 @@ public class HHCamera extends GodotPlugin {
 						return;
 					}
 					try {
+						cbCount++;
 						long now = SystemClock.elapsedRealtime();
 						if (now - lastProcMs >= 33) {
 							lastProcMs = now;
@@ -133,9 +151,11 @@ public class HHCamera extends GodotPlugin {
 							ByteArrayOutputStream os = new ByteArrayOutputStream();
 							yuv.compressToJpeg(new Rect(0, 0, fw, fh), 60, os);
 							latestJpeg.set(os.toByteArray());
+							jpgCount++;
 							frameCount++;
 						}
-					} catch (Throwable ignored) {
+					} catch (Throwable t) {
+						dbg = "jpgE:" + t.getClass().getSimpleName();
 					}
 					try {
 						cam.addCallbackBuffer(data);
@@ -144,11 +164,18 @@ public class HHCamera extends GodotPlugin {
 				}
 			});
 			c.startPreview();
+			dbg = "started";
 		} catch (Throwable t) {
+			dbg = "E:" + t.getClass().getSimpleName() + ":" + t.getMessage();
 			synchronized (lock) {
 				releaseCamera();
 			}
 		}
+	}
+
+	@UsedByGodot
+	public String getDebugInfo() {
+		return dbg + " cb=" + cbCount + " jpg=" + jpgCount + " act=" + (camera != null);
 	}
 
 	@UsedByGodot
