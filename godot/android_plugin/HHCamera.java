@@ -175,10 +175,20 @@ private void openCamera() {
 		try {
 			Activity actA = getActivity();
 			if (actA != null) {
+				android.view.Display dsp = actA.getWindowManager().getDefaultDisplay();
 				android.graphics.Point p = new android.graphics.Point();
-				actA.getWindowManager().getDefaultDisplay().getRealSize(p);
+				dsp.getRealSize(p);
 				int sm = Math.max(p.x, p.y);
 				int sn = Math.min(p.x, p.y);
+				android.view.Display.Mode md = dsp.getMode();
+				if (md != null) {
+					int mm = Math.max(md.getPhysicalWidth(), md.getPhysicalHeight());
+					int mn = Math.min(md.getPhysicalWidth(), md.getPhysicalHeight());
+					if (mm > 0 && mn > 0 && (double) mm / mn > 1.4) {
+						sm = mm;
+						sn = mn;
+					}
+				}
 				if (sn > 0) {
 					scrAsp = (double) sm / sn;
 				}
@@ -206,7 +216,7 @@ private void openCamera() {
 			for (Camera.Size s : sizes) {
 				sb.append(s.width).append("x").append(s.height).append(",");
 			}
-			Log.i("HHCamera", "sizes=" + sb.toString() + " chosen=" + (best != null ? (best.width + "x" + best.height) : "none") + " maxW=" + maxW);
+			Log.i("HHCamera", "sizes=" + sb.toString() + " chosen=" + (best != null ? (best.width + "x" + best.height) : "none") + " maxW=" + maxW + " scrAsp=" + scrAsp);
 		}
 		try {
 			List<Integer> fmts = params.getSupportedPreviewFormats();
