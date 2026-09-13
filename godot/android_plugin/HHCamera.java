@@ -14,8 +14,6 @@ import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import java.util.Locale;
 import android.opengl.EGL14;
-import android.opengl.EGLExt;
-import android.hardware.HardwareBuffer;
 
 import org.godotengine.godot.Godot;
 import org.godotengine.godot.plugin.GodotPlugin;
@@ -503,7 +501,84 @@ private void openCamera() {
 		return extInFrames;
 	}
 
-	// ===== 直通v2：硬件缓冲 → EGLImage → Godot外部纹理 =====
+		// ===== 直通v2：硬件缓冲 → EGLImage → Godot外部纹理（反射版）=====
+	private static java.lang.reflect.Method mGetHb = null;
+	private static boolean mGetHbTried = false;
+	private static java.lang.reflect.Method mCreateImg = null;
+	private static boolean mCreateImgTried = false;
+	private static java.lang.reflect.Method mDestroyImg = null;
+	private static boolean mDestroyImgTried = false;
+	private static java.lang.reflect.Method mHbClose = null;
+
+	private Object hbOf(SurfaceTexture st) {
+		try {
+			if (!mGetHbTried) {
+				mGetHbTried = true;
+				mGetHb = SurfaceTexture.class.getMethod("getHardwareBuffer");
+				Log.i("HHCamera", "extV2 getHardwareBuffer found");
+			}
+			if (mGetHb == null) {
+				return null;
+			}
+			return mGetHb.invoke(st);
+		} catch (Throwable t) {
+			extV2Err = "getHB:" + t;
+			Log.w("HHCamera", "extV2 " + extV2Err);
+			return null;
+		}
+	}
+
+	private long imgFromHb(Object hb) {
+		try {
+			if (!mCreateImgTried) {
+				mCreateImgTried = true;
+				Class<?> cExt = Class.forName("android.opengl.EGLExt");
+				Class<?> cDpy = Class.forName("android.opengl.EGLDisplay");
+				Class<?> cHb = Class.forName("android.hardware.HardwareBuffer");
+				mCreateImg = cExt.getMethod("eglCreateImageFromHardwareBuffer", cDpy, cHb);
+				Log.i("HHCamera", "extV2 eglCreateImageFromHardwareBuffer found");
+			}
+			if (mCreateImg == null) {
+				return 0;
+			}
+			Object r = mCreateImg.invoke(null, EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY), hb);
+			return r == null ? 0 : ((Long) r).longValue();
+		} catch (Throwable t) {
+			extV2Err = "mkImg:" + t;
+			Log.w("HHCamera", "extV2 " + extV2Err);
+			return 0;
+		}
+	}
+
+	private void imgDestroy(long img) {
+		if (img == 0) {
+			return;
+		}
+		try {
+			if (!mDestroyImgTried) {
+				mDestroyImgTried = true;
+				Class<?> cExt = Class.forName("android.opengl.EGLExt");
+				Class<?> cDpy = Class.forName("android.opengl.EGLDisplay");
+				mDestroyImg = cExt.getMethod("eglDestroyImageKHR", cDpy, long.class);
+			}
+			if (mDestroyImg == null) {
+				return;
+			}
+			mDestroyImg.invoke(null, EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY), img);
+		} catch (Throwable t) {
+		}
+	}
+
+	private void hbClose(Object hb) {
+		try {
+			if (mHbClose == null) {
+				mHbClose = hb.getClass().getMethod("close");
+			}
+			mHbClose.invoke(hb);
+		} catch (Throwable t) {
+		}
+	}
+
 	private void extDestroyImages() {
 		long a = extImage;
 		long b = extImgPrev1;
@@ -511,33 +586,19 @@ private void openCamera() {
 		extImage = 0;
 		extImgPrev1 = 0;
 		extImgPrev2 = 0;
-		try {
-			android.opengl.EGLDisplay d = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
-			if (a != 0) {
-				EGLExt.eglDestroyImageKHR(d, a);
-			}
-			if (b != 0) {
-				EGLExt.eglDestroyImageKHR(d, b);
-			}
-			if (c != 0) {
-				EGLExt.eglDestroyImageKHR(d, c);
-			}
-		} catch (Throwable t) {
-		}
+		imgDestroy(a);
+		imgDestroy(b);
+		imgDestroy(c);
 	}
 
 	private void grabExtFrame(SurfaceTexture st) {
 		try {
-			HardwareBuffer hb = st.getHardwareBuffer();
+			Object hb = hbOf(st);
 			if (hb == null) {
 				return;
 			}
-			long img = 0;
-			try {
-				img = EGLExt.eglCreateImageFromHardwareBuffer(EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY), hb);
-			} finally {
-				hb.close();
-			}
+			long img = imgFromHb(hb);
+			hbClose(hb);
 			if (img != 0) {
 				long old2 = extImgPrev2;
 				extImgPrev2 = extImgPrev1;
@@ -547,18 +608,13 @@ private void openCamera() {
 				if (extImgCount <= 4 || extImgCount % 300 == 0) {
 					Log.i("HHCamera", "extV2 img n=" + extImgCount);
 				}
-				if (old2 != 0) {
-					try {
-						EGLExt.eglDestroyImageKHR(EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY), old2);
-					} catch (Throwable t2) {
-					}
-				}
+				imgDestroy(old2);
 			} else {
 				extV2Err = "img0";
 			}
 		} catch (Throwable t) {
-			extV2Err = t.getClass().getSimpleName() + ":" + t.getMessage();
-			Log.w("HHCamera", "extV2 err: " + extV2Err);
+			extV2Err = "grab:" + t;
+			Log.w("HHCamera", "extV2 " + extV2Err);
 		}
 	}
 
@@ -579,7 +635,7 @@ private void openCamera() {
 		return extV2Err;
 	}
 
-	// ===== 内置 TTS 桥（修复回前台无声）=====
+	// ===== 内置 TTS 桥（修复回前台无声）=====（修复回前台无声）=====
 	private void destroyTts() {
 		try {
 			if (tts != null) {
