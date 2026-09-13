@@ -19,9 +19,18 @@ var _last_warn_ms := 0
 var _last_voice_count := -1
 var _speak_time := 0
 var _zh_voice_hint := ""
+var _plug = null
 
 func speak(text: String) -> void:
 	if not enabled or text.strip_edges() == "":
+		return
+	var p = _get_plug()
+	if p != null and p.has_method("ttsSpeak"):
+		p.ttsSpeak(text)
+		_speaking = true
+		_speak_time = Time.get_ticks_msec()
+		set_process(true)
+		speech_started.emit()
 		return
 	if _voice == "":
 		_refresh_voice()
@@ -41,6 +50,9 @@ func speak(text: String) -> void:
 func stop() -> void:
 	if not _speaking:
 		return
+	var p = _get_plug()
+	if p != null and p.has_method("ttsStop"):
+		p.ttsStop()
 	DisplayServer.tts_stop()
 	_speaking = false
 	set_process(false)
@@ -57,10 +69,20 @@ func _process(_delta: float) -> void:
 		set_process(false)
 		return
 	var elapsed := Time.get_ticks_msec() - _speak_time
-	if elapsed > 400 and not DisplayServer.tts_is_speaking():
+	var spk := DisplayServer.tts_is_speaking()
+	var p = _get_plug()
+	if p != null and p.has_method("ttsIsSpeaking"):
+		spk = bool(p.ttsIsSpeaking())
+	if elapsed > 400 and not spk:
 		_speaking = false
 		set_process(false)
 		speech_finished.emit()
+
+func _get_plug():
+	if _plug != null:
+		return _plug
+	_plug = Engine.get_singleton("HHCamera")
+	return _plug
 
 func _refresh_voice() -> void:
 	var voices := DisplayServer.tts_get_voices()

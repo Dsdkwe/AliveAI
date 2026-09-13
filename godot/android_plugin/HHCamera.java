@@ -10,6 +10,9 @@ import android.os.HandlerThread;
 import android.graphics.SurfaceTexture;
 import android.os.SystemClock;
 import android.util.Log;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
+import java.util.Locale;
 
 import org.godotengine.godot.Godot;
 import org.godotengine.godot.plugin.GodotPlugin;
@@ -69,6 +72,11 @@ public class HHCamera extends GodotPlugin {
 	private volatile int extInFrames = 0;
 	private volatile int extUp = 0;
 	private volatile String extErr = "";
+	private TextToSpeech tts = null;
+	private volatile boolean ttsReady = false;
+	private volatile boolean ttsSpeaking = false;
+	private volatile String ttsPending = null;
+	private volatile int ttsGen = 0;
 	private volatile int openTries = 0;
 	private volatile String dbg = "init";
 	private SurfaceTexture dummySt = null;
@@ -474,6 +482,143 @@ private void openCamera() {
 	@UsedByGodot
 	public int getExtInFrames() {
 		return extInFrames;
+	}
+
+	// ===== 内置 TTS 桥（修复回前台无声）=====
+	private void destroyTts() {
+		try {
+			if (tts != null) {
+				tts.stop();
+				tts.shutdown();
+			}
+		} catch (Throwable t) {
+		}
+		tts = null;
+		ttsReady = false;
+		ttsSpeaking = false;
+	}
+
+	private void ensureTts() {
+		if (tts != null) {
+			return;
+		}
+		try {
+			final Activity act = getActivity();
+			if (act == null) {
+				return;
+			}
+			tts = new TextToSpeech(act, new TextToSpeech.OnInitListener() {
+				@Override
+				public void onInit(int status) {
+					if (status == TextToSpeech.SUCCESS && tts != null) {
+						try {
+							int r = tts.setLanguage(Locale.CHINA);
+							if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+								tts.setLanguage(Locale.getDefault());
+							}
+							tts.setSpeechRate(1.0f);
+							tts.setPitch(1.0f);
+						} catch (Throwable t) {
+						}
+						ttsReady = true;
+						String pd = ttsPending;
+						if (pd != null) {
+							ttsPending = null;
+							speakNow(pd);
+						}
+					} else {
+						ttsReady = false;
+					}
+				}
+			});
+			tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+				@Override
+				public void onStart(String id) {
+					ttsSpeaking = true;
+				}
+
+				@Override
+				public void onDone(String id) {
+					ttsSpeaking = false;
+				}
+
+				@Override
+				public void onError(String id) {
+					ttsSpeaking = false;
+				}
+			});
+		} catch (Throwable t) {
+			tts = null;
+		}
+	}
+
+	private void speakNow(String text) {
+		try {
+			ttsSpeaking = true;
+			int r = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "hh" + (++ttsGen));
+			if (r == TextToSpeech.ERROR) {
+				ttsSpeaking = false;
+				destroyTts();
+				ensureTts();
+				ttsPending = text;
+			}
+		} catch (Throwable t) {
+			ttsSpeaking = false;
+		}
+	}
+
+	@UsedByGodot
+	public void ttsSpeak(String text) {
+		if (text == null || text.length() == 0) {
+			return;
+		}
+		ensureTts();
+		if (tts == null) {
+			return;
+		}
+		if (!ttsReady) {
+			ttsPending = text;
+			return;
+		}
+		speakNow(text);
+	}
+
+	@UsedByGodot
+	public void ttsStop() {
+		ttsPending = null;
+		ttsSpeaking = false;
+		try {
+			if (tts != null) {
+				tts.stop();
+			}
+		} catch (Throwable t) {
+		}
+	}
+
+	@UsedByGodot
+	public boolean ttsIsSpeaking() {
+		return ttsSpeaking;
+	}
+
+	@Override
+	public void onMainResume() {
+		super.onMainResume();
+		if (tts == null || !ttsReady) {
+			ensureTts();
+		} else {
+			try {
+				tts.getVoices();
+			} catch (Throwable t) {
+				destroyTts();
+				ensureTts();
+			}
+		}
+	}
+
+	@Override
+	public void onMainDestroy() {
+		destroyTts();
+		super.onMainDestroy();
 	}
 
 	@UsedByGodot
