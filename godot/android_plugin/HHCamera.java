@@ -116,6 +116,10 @@ public class HHCamera extends GodotPlugin {
 	private volatile long frmWindowStart = 0;
 	private volatile boolean resTestOn = false;
 	private volatile int resTestIdx = 0;
+	private volatile int bootW = 0;
+	private volatile int bootH = 0;
+	private volatile int bootMin = 0;
+	private volatile int bootMax = 0;
 	private final int[][] resTestList = new int[][] { {3200, 1440, 60000, 60000}, {3200, 1440, 15000, 60000}, {2800, 1260, 60000, 60000}, {2800, 1260, 15000, 60000}, {3136, 1440, 60000, 60000}, {2560, 1440, 60000, 60000}, {1920, 1080, 60000, 60000} };
 
 	public HHCamera(Godot godot) {
@@ -1236,6 +1240,12 @@ private void openCamera() {
 					} catch (Throwable t) {
 						Log.e("HHCamera", "cam2 config read fail: " + t.getMessage());
 					}
+					if (bootW > 0) {
+						cw = bootW;
+						ch = bootH;
+						fpsR = android.util.Range.create(bootMin, bootMax);
+						Log.i("HHCamera", "boot cfg applied " + cw + "x" + ch + "@" + bootMin + "-" + bootMax);
+					}
 					if (resTestOn) {
 						int[] cfg2 = resTestList[Math.min(resTestIdx, resTestList.length - 1)];
 						cw = cfg2[0];
@@ -1372,6 +1382,14 @@ private void openCamera() {
 				}
 			}
 		});
+	}
+	@UsedByGodot
+	public void setBootConfig(int w, int h, int mn, int mx) {
+		bootW = w;
+		bootH = h;
+		bootMin = mn;
+		bootMax = mx;
+		Log.i("HHCamera", "boot cfg set " + w + "x" + h + "@" + mn + "-" + mx);
 	}
 	@UsedByGodot
 	public void startResTest() {

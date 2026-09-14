@@ -1506,9 +1506,20 @@ func _setup_ar() -> void:
 		print("[AR] plugin found, waiting for camera permission")
 		_ar_native_auto = true
 		print("[AR] native auto default on")
-		_ar_res_test_pending = FileAccess.file_exists("/storage/emulated/0/Download/HalfHearted/restest.txt")
-		if _ar_res_test_pending:
-			print("[AR] res-test flag detected")
+		var rt_path := "/storage/emulated/0/Download/HalfHearted/restest.txt"
+		if FileAccess.file_exists(rt_path):
+			var rt_txt := FileAccess.get_file_as_string(rt_path).strip_edges()
+			if rt_txt == "sweep":
+				_ar_res_test_pending = true
+				print("[AR] res-test sweep requested")
+			elif rt_txt.contains("x") and rt_txt.contains(" "):
+				var toks := rt_txt.split(" ")
+				if toks.size() >= 3 and toks[0].contains("x") and _ar_plugin != null:
+					var whs := toks[0].split("x")
+					if whs.size() == 2:
+						_ar_plugin.setBootConfig(whs[0].to_int(), whs[1].to_int(), toks[1].to_int(), toks[2].to_int())
+			else:
+				print("[AR] restest flag ignored: ", rt_txt)
 	else:
 		print("[AR] plugin not found (desktop / non-plugin build) - dark background")
 		_show_status("AR:插件未加载（深色背景）")
