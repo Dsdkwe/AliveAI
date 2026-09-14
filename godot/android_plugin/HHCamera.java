@@ -5,6 +5,7 @@ import android.graphics.Rect;
 import android.graphics.YuvImage;
 import android.app.Activity;
 import android.view.SurfaceView;
+import android.view.TextureView;
 import android.view.SurfaceHolder;
 import android.view.View;
 import android.view.ViewGroup;
@@ -100,6 +101,14 @@ public class HHCamera extends GodotPlugin {
 	private volatile int nativeRetries = 0;
 	private volatile SurfaceView layerAppliedView = null;
 	private volatile boolean cam2Probed = false;
+	private volatile TextureView nativeTexView = null;
+	private volatile android.hardware.camera2.CameraDevice cam2Device = null;
+	private volatile android.hardware.camera2.CameraCaptureSession cam2Session = null;
+	private volatile android.view.Surface cam2Surface = null;
+	private volatile boolean cam2Failed = false;
+	private volatile boolean cam2FallbackDone = false;
+	private volatile int cam2BufW = 0;
+	private volatile int cam2BufH = 0;
 
 	public HHCamera(Godot godot) {
 		super(godot);
@@ -920,7 +929,7 @@ private void openCamera() {
 	}
 	@UsedByGodot
 	public boolean isNativeCamOk() {
-		return nativeCam != null;
+		return nativeCam != null || cam2Device != null;
 	}
 	@UsedByGodot
 	public void showNativePreview() {
@@ -934,38 +943,43 @@ private void openCamera() {
 			@Override
 			public void run() {
 				try {
-					if (nativeView != null) {
+					if (nativeView != null || nativeTexView != null) {
 						return;
 					}
 					ViewGroup root = (ViewGroup) act.findViewById(android.R.id.content);
 					if (root.getChildCount() > 0 && root.getChildAt(0) instanceof ViewGroup) {
 						root = (ViewGroup) root.getChildAt(0);
 					}
-					final SurfaceView sv = new SurfaceView(act);
-					sv.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-					sv.setClickable(false);
-					sv.setFocusable(false);
-					root.addView(sv, 0);
-					nativeView = sv;
-					sv.getHolder().addCallback(new SurfaceHolder.Callback() {
+					final TextureView tv = new TextureView(act);
+					tv.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+					tv.setClickable(false);
+					tv.setFocusable(false);
+					root.addView(tv, 0);
+					nativeTexView = tv;
+					tv.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
 						@Override
-						public void surfaceCreated(SurfaceHolder holder) {
-							Log.i("HHCamera", "native surface created");
-							openNativeCam(holder);
+						public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture st, int width, int height) {
+							Log.i("HHCamera", "tex surface available " + width + "x" + height);
+							openNativeTexture(st);
 						}
 						@Override
-						public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+						public void onSurfaceTextureSizeChanged(android.graphics.SurfaceTexture st, int width, int height) {
+							applyTexTransform();
 						}
 						@Override
-						public void surfaceDestroyed(SurfaceHolder holder) {
+						public boolean onSurfaceTextureDestroyed(android.graphics.SurfaceTexture st) {
 							closeNativeCam();
+							return true;
+						}
+						@Override
+						public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture st) {
 						}
 					});
 					try {
 						attachTransparentLayers((ViewGroup) act.getWindow().getDecorView());
 					} catch (Throwable ignoredA) {
 					}
-					Log.i("HHCamera", "native preview view added");
+					Log.i("HHCamera", "native preview tex view added");
 				} catch (Throwable t) {
 					Log.e("HHCamera", "showNativePreview fail", t);
 				}
@@ -1013,6 +1027,298 @@ private void openCamera() {
 		} catch (Throwable ignored) {
 		}
 		Log.i("HHCamera", "attach walk found=" + found);
+	}
+	private void closeCam2() {
+		try {
+			if (cam2Session != null) {
+				cam2Session.close();
+			}
+		} catch (Throwable ignored) {
+		}
+		cam2Session = null;
+		try {
+			if (cam2Device != null) {
+				cam2Device.close();
+			}
+		} catch (Throwable ignored) {
+		}
+		cam2Device = null;
+		try {
+			if (cam2Surface != null) {
+				cam2Surface.release();
+			}
+		} catch (Throwable ignored) {
+		}
+		cam2Surface = null;
+	}
+	private void startNativeClassicFallback() {
+		if (cam2FallbackDone) {
+			return;
+		}
+		cam2FallbackDone = true;
+		cam2Failed = true;
+		closeCam2();
+		final Activity act = getActivity();
+		if (act == null) {
+			return;
+		}
+		act.runOnUiThread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					if (nativeTexView != null) {
+						ViewGroup p1 = (ViewGroup) nativeTexView.getParent();
+						if (p1 != null) {
+							p1.removeView(nativeTexView);
+						}
+						nativeTexView = null;
+					}
+					if (nativeView != null) {
+						return;
+					}
+					ViewGroup root = (ViewGroup) act.findViewById(android.R.id.content);
+					if (root.getChildCount() > 0 && root.getChildAt(0) instanceof ViewGroup) {
+						root = (ViewGroup) root.getChildAt(0);
+					}
+					final SurfaceView sv = new SurfaceView(act);
+					sv.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+					sv.setClickable(false);
+					sv.setFocusable(false);
+					root.addView(sv, 0);
+					nativeView = sv;
+					sv.getHolder().addCallback(new SurfaceHolder.Callback() {
+						@Override
+						public void surfaceCreated(SurfaceHolder holder) {
+							Log.i("HHCamera", "fallback surface created");
+							openNativeCam(holder);
+						}
+						@Override
+						public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+						}
+						@Override
+						public void surfaceDestroyed(SurfaceHolder holder) {
+							closeNativeCam();
+						}
+					});
+					Log.i("HHCamera", "classic fallback view added");
+				} catch (Throwable t) {
+					Log.e("HHCamera", "fallback fail: " + t.getMessage());
+				}
+			}
+		});
+	}
+	private void openNativeTexture(final android.graphics.SurfaceTexture st) {
+		if (cam2Device != null || cam2Failed || !nativeMode) {
+			return;
+		}
+		synchronized (lock) {
+			if (nativeThread == null) {
+				nativeThread = new HandlerThread("HHCamNative");
+				nativeThread.start();
+				nativeHandler = new Handler(nativeThread.getLooper());
+			}
+		}
+		final Handler h = nativeHandler;
+		if (h == null) {
+			return;
+		}
+		h.post(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					if (!cam2Probed) {
+						cam2Probed = true;
+						probeCam2();
+					}
+					final android.hardware.camera2.CameraManager mgr = (android.hardware.camera2.CameraManager) getActivity().getSystemService(android.content.Context.CAMERA_SERVICE);
+					if (mgr == null) {
+						startNativeClassicFallback();
+						return;
+					}
+					String camId = "0";
+					try {
+						for (String cid : mgr.getCameraIdList()) {
+							Integer lens = mgr.getCameraCharacteristics(cid).get(android.hardware.camera2.CameraCharacteristics.LENS_FACING);
+							if (lens != null && lens == android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK) {
+								camId = cid;
+								break;
+							}
+						}
+					} catch (Throwable ignored) {
+					}
+					final String camIdF = camId;
+					int cw = 3200;
+					int ch = 1440;
+					android.util.Range<Integer> fpsR = null;
+					try {
+						android.hardware.camera2.CameraCharacteristics cc2 = mgr.getCameraCharacteristics(camIdF);
+						android.hardware.camera2.params.StreamConfigurationMap map = cc2.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+						android.util.Size pick = null;
+						if (map != null) {
+							android.util.Size[] sizes = map.getOutputSizes(android.graphics.SurfaceTexture.class);
+							if (sizes != null) {
+								for (android.util.Size sz : sizes) {
+									if (sz.getWidth() == 3200 && sz.getHeight() == 1440) {
+										pick = sz;
+										break;
+									}
+								}
+								if (pick == null) {
+									for (android.util.Size sz : sizes) {
+										if (sz.getWidth() == 2800 && sz.getHeight() == 1260) {
+											pick = sz;
+											break;
+										}
+									}
+								}
+								if (pick == null) {
+									double bestScore = 1e9;
+									for (android.util.Size sz : sizes) {
+										if (sz.getWidth() < 1920) {
+											continue;
+										}
+										double asp = (double) sz.getWidth() / (double) sz.getHeight();
+										double score = Math.abs(asp - 2.2222);
+										if (score < bestScore) {
+											bestScore = score;
+											pick = sz;
+										}
+									}
+								}
+							}
+						}
+						if (pick != null) {
+							cw = pick.getWidth();
+							ch = pick.getHeight();
+						}
+						android.util.Range<Integer>[] rs = cc2.get(android.hardware.camera2.CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+						if (rs != null) {
+							for (android.util.Range<Integer> rrr : rs) {
+								if (rrr.getUpper() == 60 && rrr.getLower() == 60) {
+									fpsR = rrr;
+								}
+							}
+							if (fpsR == null) {
+								for (android.util.Range<Integer> rrr : rs) {
+									if (rrr.getUpper() == 60 && rrr.getLower() <= 15) {
+										fpsR = rrr;
+									}
+								}
+							}
+						}
+					} catch (Throwable t) {
+						Log.e("HHCamera", "cam2 config read fail: " + t.getMessage());
+					}
+					cam2BufW = cw;
+					cam2BufH = ch;
+					final android.util.Range<Integer> fpsRF = fpsR;
+					Log.i("HHCamera", "cam2 buffer=" + cw + "x" + ch + " fps=" + fpsRF);
+					st.setDefaultBufferSize(cw, ch);
+					final android.view.Surface surf = new android.view.Surface(st);
+					cam2Surface = surf;
+					mgr.openCamera(camIdF, new android.hardware.camera2.CameraDevice.StateCallback() {
+						@Override
+						public void onOpened(android.hardware.camera2.CameraDevice dev) {
+							cam2Device = dev;
+							try {
+								dev.createCaptureSession(java.util.Collections.singletonList(surf), new android.hardware.camera2.CameraCaptureSession.StateCallback() {
+									@Override
+									public void onConfigured(android.hardware.camera2.CameraCaptureSession session) {
+										cam2Session = session;
+										try {
+											android.hardware.camera2.CaptureRequest.Builder b = dev.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_PREVIEW);
+											b.addTarget(surf);
+											b.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
+											if (fpsRF != null) {
+												b.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRF);
+											}
+											try {
+												session.setRepeatingRequest(b.build(), null, nativeHandler);
+												Log.i("HHCamera", "cam2 preview started fps=" + fpsRF);
+											} catch (Throwable t) {
+												Log.e("HHCamera", "cam2 fps req fail, retry default: " + t.getMessage());
+												b.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, null);
+												session.setRepeatingRequest(b.build(), null, nativeHandler);
+												Log.i("HHCamera", "cam2 preview started (default fps)");
+											}
+											applyTexTransform();
+										} catch (Throwable t) {
+											Log.e("HHCamera", "cam2 request fail: " + t.getMessage());
+										}
+									}
+									@Override
+									public void onConfigureFailed(android.hardware.camera2.CameraCaptureSession session) {
+										Log.e("HHCamera", "cam2 session failed");
+										startNativeClassicFallback();
+									}
+								}, nativeHandler);
+							} catch (Throwable t) {
+								Log.e("HHCamera", "cam2 session create fail: " + t.getMessage());
+								startNativeClassicFallback();
+							}
+						}
+						@Override
+						public void onDisconnected(android.hardware.camera2.CameraDevice dev) {
+							Log.e("HHCamera", "cam2 disconnected");
+							dev.close();
+							cam2Device = null;
+						}
+						@Override
+						public void onError(android.hardware.camera2.CameraDevice dev, int error) {
+							Log.e("HHCamera", "cam2 error " + error);
+							dev.close();
+							cam2Device = null;
+							startNativeClassicFallback();
+						}
+					}, nativeHandler);
+				} catch (Throwable t) {
+					Log.e("HHCamera", "cam2 start fail: " + t.getMessage());
+					startNativeClassicFallback();
+				}
+			}
+		});
+	}
+	private void applyTexTransform() {
+		final TextureView tv = nativeTexView;
+		if (tv == null || cam2BufW <= 0) {
+			return;
+		}
+		final Activity act = getActivity();
+		if (act == null) {
+			return;
+		}
+		act.runOnUiThread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					int rot = act.getWindowManager().getDefaultDisplay().getRotation();
+					int rd = rot * 90;
+					int sensor = 90;
+					int dispOri = (sensor - rd + 360) % 360;
+					int vw = tv.getWidth();
+					int vh = tv.getHeight();
+					if (vw <= 0 || vh <= 0) {
+						return;
+					}
+					float cx = vw * 0.5f;
+					float cy = vh * 0.5f;
+					android.graphics.Matrix m = new android.graphics.Matrix();
+					m.postRotate(dispOri, cx, cy);
+					double effW = (dispOri % 180 == 90) ? cam2BufH : cam2BufW;
+					double effH = (dispOri % 180 == 90) ? cam2BufW : cam2BufH;
+					float s = (float) Math.max(vw / effW, vh / effH);
+					m.postScale(s, s, cx, cy);
+					tv.setTransform(m);
+					Log.i("HHCamera", "tex transform rot=" + dispOri + " scale=" + s + " view=" + vw + "x" + vh);
+				} catch (Throwable t) {
+					Log.e("HHCamera", "tex transform fail: " + t.getMessage());
+				}
+			}
+		});
+	}
+	@UsedByGodot
+	public void refreshNativeTransform() {
+		applyTexTransform();
 	}
 	@UsedByGodot
 	public void probeCam2() {
@@ -1238,6 +1544,7 @@ private void openCamera() {
 		});
 	}
 	private void closeNativeCam() {
+		closeCam2();
 		final Handler h = nativeHandler;
 		if (h == null) {
 			try {
@@ -1285,6 +1592,14 @@ private void openCamera() {
 			@Override
 			public void run() {
 				try {
+					if (nativeTexView != null) {
+						ViewGroup parentT = (ViewGroup) nativeTexView.getParent();
+						if (parentT != null) {
+							parentT.removeView(nativeTexView);
+						}
+						nativeTexView = null;
+						Log.i("HHCamera", "native tex view removed");
+					}
 					if (nativeView != null) {
 						ViewGroup parent = (ViewGroup) nativeView.getParent();
 						if (parent != null) {
@@ -1319,6 +1634,13 @@ private void openCamera() {
 			if (nativeCam == null && nativeView != null) {
 				openNativeCam(nativeView.getHolder());
 			}
+			if (cam2Device == null && nativeTexView != null && !cam2Failed) {
+				android.graphics.SurfaceTexture st2 = nativeTexView.getSurfaceTexture();
+				if (st2 != null) {
+					openNativeTexture(st2);
+				}
+			}
+			applyTexTransform();
 		}
 		if (tts == null || !ttsReady) {
 			ensureTts();

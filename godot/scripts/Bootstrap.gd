@@ -1065,7 +1065,7 @@ func _setup_ui() -> void:
 
 	# ---- 聊天面板（底部）----
 	var panel_sb := StyleBoxFlat.new()
-	panel_sb.bg_color = Color(0.05, 0.06, 0.09, 0.45)
+	panel_sb.bg_color = Color(0.05, 0.06, 0.09, 0.32)
 	panel_sb.corner_radius_top_left = 20
 	panel_sb.corner_radius_top_right = 20
 	panel_sb.corner_radius_bottom_left = 20
@@ -1136,7 +1136,7 @@ func _setup_ui() -> void:
 	_sidebar.position = Vector2(-_sidebar_w, 0)
 	_sidebar.size = Vector2(_sidebar_w, view.y)
 	var panel_sd := StyleBoxFlat.new()
-	panel_sd.bg_color = Color(0.045, 0.052, 0.075, 0.86)
+	panel_sd.bg_color = Color(0.045, 0.052, 0.075, 0.80)
 	panel_sd.corner_radius_top_right = 28
 	panel_sd.corner_radius_bottom_right = 28
 	panel_sd.border_width_right = 2
@@ -1377,7 +1377,7 @@ func _setup_ui() -> void:
 	_menu_btn.size = Vector2(152, 152)
 	_menu_btn.add_theme_font_size_override("font_size", 92)
 	var mb_normal := StyleBoxFlat.new()
-	mb_normal.bg_color = Color(0.06, 0.07, 0.11, 0.55)
+	mb_normal.bg_color = Color(0.06, 0.07, 0.11, 0.42)
 	mb_normal.set_corner_radius_all(38)
 	mb_normal.border_width_left = 2
 	mb_normal.border_width_top = 2
@@ -1557,7 +1557,8 @@ func _tick_ar(delta: float) -> void:
 		_ar_hud_t += delta
 		if _ar_hud_t >= 2.0 and _status != null:
 			_ar_hud_t = 0.0
-			_status.text = "AR:原生相机（系统直显）"
+			_status.text = "AR:原生相机（Camera2）"
+			_ar_plugin.refreshNativeTransform()
 		return
 	if _ar_pending:
 		_ar_wait += delta
