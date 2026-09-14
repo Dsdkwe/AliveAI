@@ -123,9 +123,9 @@ var _ar_auto_t := 0.0
 var _ar_native_checking := false
 var _ar_native_check_t := 0.0
 var _ar_xs := 1.0
-var _ar_ys := 1.0
+var _ar_ys := 0.25
 var _ar_last_log_xs := 1.0
-var _ar_last_log_ys := 1.0
+var _ar_last_log_ys := 0.25
 var _we: WorldEnvironment = null
 var _env: Environment = null
 var _ar_ext_seen := -1
@@ -1378,7 +1378,7 @@ func _setup_ui() -> void:
 	ys_slider.min_value = 0.1
 	ys_slider.max_value = 5.0
 	ys_slider.step = 0.05
-	ys_slider.value = 1.0
+	ys_slider.value = 0.25
 	ys_slider.custom_minimum_size = Vector2(600, 64)
 	ys_slider.value_changed.connect(_on_ys_changed)
 	vbox.add_child(ys_slider)

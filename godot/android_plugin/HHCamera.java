@@ -111,7 +111,9 @@ public class HHCamera extends GodotPlugin {
 	private volatile int cam2BufH = 0;
 	private volatile int debugRotOffset = 0;
 	private volatile float extraScaleX = 1.0f;
-	private volatile float extraScaleY = 1.0f;
+	private volatile float extraScaleY = 0.25f;
+	private final java.util.concurrent.atomic.AtomicInteger frmCount = new java.util.concurrent.atomic.AtomicInteger(0);
+	private volatile long frmWindowStart = 0;
 
 	public HHCamera(Godot godot) {
 		super(godot);
@@ -981,6 +983,20 @@ private void openCamera() {
 						}
 						@Override
 						public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture st) {
+							try {
+								frmCount.incrementAndGet();
+								long now2 = android.os.SystemClock.elapsedRealtime();
+								if (frmWindowStart == 0) {
+									frmWindowStart = now2;
+								}
+								long dt = now2 - frmWindowStart;
+								if (dt >= 2000) {
+									int cw2 = frmCount.getAndSet(0);
+									frmWindowStart = now2;
+									Log.i("HHCamera", "tex fps=" + (cw2 * 1000 / dt));
+								}
+							} catch (Throwable ignored) {
+							}
 						}
 					});
 					try {
@@ -1224,6 +1240,12 @@ private void openCamera() {
 					st.setDefaultBufferSize(cw, ch);
 					final android.view.Surface surf = new android.view.Surface(st);
 					cam2Surface = surf;
+					try {
+						if (android.os.Build.VERSION.SDK_INT >= 30) {
+							surf.setFrameRate(60.0f, android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
+						}
+					} catch (Throwable ignored) {
+					}
 					mgr.openCamera(camIdF, new android.hardware.camera2.CameraDevice.StateCallback() {
 						@Override
 						public void onOpened(android.hardware.camera2.CameraDevice dev) {
