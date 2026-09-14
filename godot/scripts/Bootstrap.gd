@@ -123,10 +123,11 @@ var _ar_auto_t := 0.0
 var _ar_native_checking := false
 var _ar_native_check_t := 0.0
 var _ar_xs := 1.0
-var _ar_ys := 0.25
+var _ar_ys := 0.2
 var _ar_last_log_xs := 1.0
-var _ar_last_log_ys := 0.25
+var _ar_last_log_ys := 0.2
 var _ar_res_test_pending := false
+const AR_SCALE_PATH := "user://ar_scale.cfg"
 var _we: WorldEnvironment = null
 var _env: Environment = null
 var _ar_ext_seen := -1
@@ -143,6 +144,7 @@ var _sb_hijack := false
 var _sb_mode := ""
 
 func _ready() -> void:
+	_load_ar_scale()
 	_setup_font()
 	_setup_environment()
 	_setup_light()
@@ -1293,6 +1295,7 @@ func _setup_ui() -> void:
 
 	_key_edit = LineEdit.new()
 	_key_edit.secret = true
+	_key_edit.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_PASSWORD
 	_key_edit.placeholder_text = "sk-..."
 	_key_edit.add_theme_font_size_override("font_size", 46)
 	_key_edit.custom_minimum_size = Vector2(0, 128)
@@ -1367,7 +1370,7 @@ func _setup_ui() -> void:
 	xs_slider.min_value = 0.1
 	xs_slider.max_value = 5.0
 	xs_slider.step = 0.05
-	xs_slider.value = 1.0
+	xs_slider.value = _ar_xs
 	xs_slider.custom_minimum_size = Vector2(600, 64)
 	xs_slider.value_changed.connect(_on_xs_changed)
 	vbox.add_child(xs_slider)
@@ -1379,7 +1382,7 @@ func _setup_ui() -> void:
 	ys_slider.min_value = 0.1
 	ys_slider.max_value = 5.0
 	ys_slider.step = 0.05
-	ys_slider.value = 0.25
+	ys_slider.value = _ar_ys
 	ys_slider.custom_minimum_size = Vector2(600, 64)
 	ys_slider.value_changed.connect(_on_ys_changed)
 	vbox.add_child(ys_slider)
@@ -1729,6 +1732,7 @@ func _enable_native_mode() -> void:
 	get_viewport().transparent_bg = true
 	_ar_plugin.stop()
 	_ar_plugin.showNativePreview()
+	_ar_plugin.setExtraScale(_ar_xs, _ar_ys)
 	_show_status("AR:原生相机底已开启（实验）")
 	print("[AR] native preview on")
 
@@ -1759,8 +1763,28 @@ func _on_res_test_pressed() -> void:
 	else:
 		_show_status("AR:请先等原生相机启动")
 
+func _load_ar_scale() -> void:
+	if not FileAccess.file_exists(AR_SCALE_PATH):
+		return
+	var f := FileAccess.open(AR_SCALE_PATH, FileAccess.READ)
+	if f == null:
+		return
+	var d = JSON.parse_string(f.get_as_text())
+	f.close()
+	if typeof(d) == TYPE_DICTIONARY:
+		_ar_xs = float(d.get("xs", _ar_xs))
+		_ar_ys = float(d.get("ys", _ar_ys))
+		print("[AR] scale loaded xs=", _ar_xs, " ys=", _ar_ys)
+
+func _save_ar_scale() -> void:
+	var f := FileAccess.open(AR_SCALE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify({"xs": _ar_xs, "ys": _ar_ys}))
+		f.close()
+
 func _on_xs_changed(v: float) -> void:
 	_ar_xs = v
+	_save_ar_scale()
 	if absf(v - _ar_last_log_xs) > 0.04:
 		_ar_last_log_xs = v
 		print("[AR] user scale x=", v)
@@ -1769,6 +1793,7 @@ func _on_xs_changed(v: float) -> void:
 
 func _on_ys_changed(v: float) -> void:
 	_ar_ys = v
+	_save_ar_scale()
 	if absf(v - _ar_last_log_ys) > 0.04:
 		_ar_last_log_ys = v
 		print("[AR] user scale y=", v)

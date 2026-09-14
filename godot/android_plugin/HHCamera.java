@@ -111,7 +111,7 @@ public class HHCamera extends GodotPlugin {
 	private volatile int cam2BufH = 0;
 	private volatile int debugRotOffset = 0;
 	private volatile float extraScaleX = 1.0f;
-	private volatile float extraScaleY = 0.25f;
+	private volatile float extraScaleY = 0.2f;
 	private final java.util.concurrent.atomic.AtomicInteger frmCount = new java.util.concurrent.atomic.AtomicInteger(0);
 	private volatile long frmWindowStart = 0;
 	private volatile boolean resTestOn = false;
