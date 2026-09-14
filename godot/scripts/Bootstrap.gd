@@ -1537,7 +1537,7 @@ func _tick_ar(delta: float) -> void:
 		return
 	if _ar_native_auto and not _ar_native_on:
 		_ar_auto_t += delta
-		if _ar_auto_t > 2.5 and _camera_granted():
+		if _ar_auto_t > 6.0 and _camera_granted():
 			_ar_native_auto = false
 			print("[AR] native auto-test enabling")
 			_enable_native_mode()

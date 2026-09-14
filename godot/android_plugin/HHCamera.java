@@ -98,6 +98,7 @@ public class HHCamera extends GodotPlugin {
 	private Handler nativeHandler = null;
 	private volatile boolean nativeMode = false;
 	private volatile int nativeRetries = 0;
+	private volatile SurfaceView layerAppliedView = null;
 
 	public HHCamera(Godot godot) {
 		super(godot);
@@ -976,13 +977,27 @@ private void openCamera() {
 					String cn = v.getClass().getName();
 					if (cn.contains("GodotGLRenderView") || cn.contains("GLSurfaceView")) {
 						found++;
-						try {
-							SurfaceView gv = (SurfaceView) v;
-							gv.setZOrderOnTop(true);
-							gv.getHolder().setFormat(PixelFormat.TRANSLUCENT);
-							Log.i("HHCamera", "translucent layer set on " + cn);
-						} catch (Throwable t) {
-							Log.e("HHCamera", "translucent set fail: " + t.getMessage());
+						if (layerAppliedView != v) {
+							layerAppliedView = (SurfaceView) v;
+							try {
+								final SurfaceView gv = (SurfaceView) v;
+								gv.setVisibility(View.INVISIBLE);
+								gv.postDelayed(new Runnable() {
+									@Override
+									public void run() {
+										try {
+											gv.getHolder().setFormat(PixelFormat.TRANSLUCENT);
+											gv.setZOrderOnTop(true);
+											gv.setVisibility(View.VISIBLE);
+											Log.i("HHCamera", "translucent layer set on " + gv.getClass().getName());
+										} catch (Throwable t) {
+											Log.e("HHCamera", "translucent set fail: " + t.getMessage());
+										}
+									}
+								}, 150);
+							} catch (Throwable t2) {
+								Log.e("HHCamera", "layer dance fail: " + t2.getMessage());
+							}
 						}
 					}
 				}
@@ -1204,10 +1219,12 @@ private void openCamera() {
 				startInternalLocked();
 			}
 		}
-		if (nativeMode && nativeCam == null && nativeView != null) {
-			openNativeCam(nativeView.getHolder());
+		if (nativeMode) {
+			scheduleLayerAttach();
+			if (nativeCam == null && nativeView != null) {
+				openNativeCam(nativeView.getHolder());
+			}
 		}
-		scheduleLayerAttach();
 		if (tts == null || !ttsReady) {
 			ensureTts();
 		} else {
