@@ -955,7 +955,10 @@ private void openCamera() {
 							closeNativeCam();
 						}
 					});
-					attachTransparentLayers(root);
+					try {
+						attachTransparentLayers((ViewGroup) act.getWindow().getDecorView());
+					} catch (Throwable ignoredA) {
+					}
 					Log.i("HHCamera", "native preview view added");
 				} catch (Throwable t) {
 					Log.e("HHCamera", "showNativePreview fail", t);
@@ -965,17 +968,22 @@ private void openCamera() {
 		scheduleLayerAttach();
 	}
 	private void attachTransparentLayers(ViewGroup root) {
+		int found = 0;
 		try {
 			for (int i = 0; i < root.getChildCount(); i++) {
 				View v = root.getChildAt(i);
-				if (v instanceof GLSurfaceView) {
-					try {
-						GLSurfaceView gv = (GLSurfaceView) v;
-						gv.setZOrderOnTop(true);
-						gv.getHolder().setFormat(PixelFormat.TRANSLUCENT);
-						Log.i("HHCamera", "translucent layer set on " + gv.getClass().getName());
-					} catch (Throwable t) {
-						Log.e("HHCamera", "translucent set fail", t);
+				if (v instanceof SurfaceView && v != nativeView) {
+					String cn = v.getClass().getName();
+					if (cn.contains("GodotGLRenderView") || cn.contains("GLSurfaceView")) {
+						found++;
+						try {
+							SurfaceView gv = (SurfaceView) v;
+							gv.setZOrderOnTop(true);
+							gv.getHolder().setFormat(PixelFormat.TRANSLUCENT);
+							Log.i("HHCamera", "translucent layer set on " + cn);
+						} catch (Throwable t) {
+							Log.e("HHCamera", "translucent set fail: " + t.getMessage());
+						}
 					}
 				}
 				if (v instanceof ViewGroup) {
@@ -984,6 +992,7 @@ private void openCamera() {
 			}
 		} catch (Throwable ignored) {
 		}
+		Log.i("HHCamera", "attach walk found=" + found);
 	}
 	private void scheduleLayerAttach() {
 		final Activity act = getActivity();
@@ -997,11 +1006,9 @@ private void openCamera() {
 				@Override
 				public void run() {
 					try {
-						ViewGroup root = (ViewGroup) act.findViewById(android.R.id.content);
-						if (root.getChildCount() > 0 && root.getChildAt(0) instanceof ViewGroup) {
-							root = (ViewGroup) root.getChildAt(0);
+						if (decor instanceof ViewGroup) {
+							attachTransparentLayers((ViewGroup) decor);
 						}
-						attachTransparentLayers(root);
 					} catch (Throwable ignored) {
 					}
 				}
