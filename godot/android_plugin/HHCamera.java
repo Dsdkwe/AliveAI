@@ -4,6 +4,12 @@ import android.graphics.ImageFormat;
 import android.graphics.Rect;
 import android.graphics.YuvImage;
 import android.app.Activity;
+import android.view.SurfaceView;
+import android.view.SurfaceHolder;
+import android.view.View;
+import android.view.ViewGroup;
+import android.opengl.GLSurfaceView;
+import android.graphics.PixelFormat;
 import android.hardware.Camera;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -86,6 +92,12 @@ public class HHCamera extends GodotPlugin {
 	private volatile int openTries = 0;
 	private volatile String dbg = "init";
 	private SurfaceTexture dummySt = null;
+	private volatile SurfaceView nativeView = null;
+	private volatile Camera nativeCam = null;
+	private HandlerThread nativeThread = null;
+	private Handler nativeHandler = null;
+	private volatile boolean nativeMode = false;
+	private volatile int nativeRetries = 0;
 
 	public HHCamera(Godot godot) {
 		super(godot);
@@ -899,11 +911,229 @@ private void openCamera() {
 		return lastPreviewHeight;
 	}
 
+	// ================= 原生相机预览（透明叠加模式） =================
+	@UsedByGodot
+	public boolean isNativeOn() {
+		return nativeMode;
+	}
+	@UsedByGodot
+	public void showNativePreview() {
+		final Activity act = getActivity();
+		if (act == null) {
+			return;
+		}
+		nativeMode = true;
+		nativeRetries = 0;
+		act.runOnUiThread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					if (nativeView != null) {
+						return;
+					}
+					ViewGroup root = (ViewGroup) act.findViewById(android.R.id.content);
+					if (root.getChildCount() > 0 && root.getChildAt(0) instanceof ViewGroup) {
+						root = (ViewGroup) root.getChildAt(0);
+					}
+					final SurfaceView sv = new SurfaceView(act);
+					sv.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+					sv.setClickable(false);
+					sv.setFocusable(false);
+					root.addView(sv, 0);
+					nativeView = sv;
+					sv.getHolder().addCallback(new SurfaceHolder.Callback() {
+						@Override
+						public void surfaceCreated(SurfaceHolder holder) {
+							Log.i("HHCamera", "native surface created");
+							openNativeCam(holder);
+						}
+						@Override
+						public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+						}
+						@Override
+						public void surfaceDestroyed(SurfaceHolder holder) {
+							closeNativeCam();
+						}
+					});
+					attachTransparentLayers(root);
+					Log.i("HHCamera", "native preview view added");
+				} catch (Throwable t) {
+					Log.e("HHCamera", "showNativePreview fail", t);
+				}
+			}
+		});
+		act.getWindow().getDecorView().postDelayed(new Runnable() {
+			@Override
+			public void run() {
+				final Activity a2 = getActivity();
+				if (a2 == null || !nativeMode) {
+					return;
+				}
+				try {
+					ViewGroup r2 = (ViewGroup) a2.findViewById(android.R.id.content);
+					if (r2.getChildCount() > 0 && r2.getChildAt(0) instanceof ViewGroup) {
+						r2 = (ViewGroup) r2.getChildAt(0);
+					}
+					attachTransparentLayers(r2);
+				} catch (Throwable ignored) {
+				}
+			}
+		}, 1800);
+	}
+	private void attachTransparentLayers(ViewGroup root) {
+		try {
+			for (int i = 0; i < root.getChildCount(); i++) {
+				View v = root.getChildAt(i);
+				if (v instanceof GLSurfaceView) {
+					try {
+						GLSurfaceView gv = (GLSurfaceView) v;
+						gv.setZOrderMediaOverlay(true);
+						gv.getHolder().setFormat(PixelFormat.TRANSLUCENT);
+						Log.i("HHCamera", "translucent layer set on " + gv.getClass().getName());
+					} catch (Throwable t) {
+						Log.e("HHCamera", "translucent set fail", t);
+					}
+				}
+				if (v instanceof ViewGroup) {
+					attachTransparentLayers((ViewGroup) v);
+				}
+			}
+		} catch (Throwable ignored) {
+		}
+	}
+	private void openNativeCam(final SurfaceHolder holder) {
+		synchronized (lock) {
+			if (nativeThread == null) {
+				nativeThread = new HandlerThread("HHCamNative");
+				nativeThread.start();
+				nativeHandler = new Handler(nativeThread.getLooper());
+			}
+		}
+		final Handler h = nativeHandler;
+		if (h == null) {
+			return;
+		}
+		h.post(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					if (nativeCam != null) {
+						return;
+					}
+					Camera cam = Camera.open(0);
+					Camera.Parameters p = cam.getParameters();
+					List<Camera.Size> sizes = p.getSupportedPreviewSizes();
+					Camera.Size best = null;
+					for (Camera.Size s : sizes) {
+						if (s.width == 2800 && s.height == 1260) {
+							best = s;
+							break;
+						}
+						if (best == null || (s.width <= 2800 && (long) s.width * s.height > (long) best.width * best.height)) {
+							best = s;
+						}
+					}
+					if (best != null) {
+						p.setPreviewSize(best.width, best.height);
+					}
+					try {
+						cam.setParameters(p);
+					} catch (Throwable t) {
+						Log.e("HHCamera", "native setParameters fail", t);
+					}
+					cam.setDisplayOrientation(90);
+					cam.setPreviewDisplay(holder);
+					cam.startPreview();
+					nativeCam = cam;
+					lastPreviewWidth = (best != null) ? best.width : 0;
+					lastPreviewHeight = (best != null) ? best.height : 0;
+					Log.i("HHCamera", "native cam started sz=" + lastPreviewWidth + "x" + lastPreviewHeight);
+				} catch (Throwable t) {
+					Log.e("HHCamera", "native cam fail", t);
+					nativeRetries++;
+					final Handler hh = nativeHandler;
+					if (hh != null && nativeMode && nativeCam == null && nativeRetries < 4) {
+						hh.postDelayed(new Runnable() {
+							@Override
+							public void run() {
+								if (nativeMode && nativeCam == null) {
+									openNativeCam(holder);
+								}
+							}
+						}, 700);
+					}
+				}
+			}
+		});
+	}
+	private void closeNativeCam() {
+		final Handler h = nativeHandler;
+		if (h == null) {
+			try {
+				if (nativeCam != null) {
+					nativeCam.stopPreview();
+					nativeCam.release();
+				}
+			} catch (Throwable ignored) {
+			}
+			nativeCam = null;
+			return;
+		}
+		h.post(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					if (nativeCam != null) {
+						try {
+							nativeCam.setPreviewDisplay(null);
+						} catch (Throwable ignored) {
+						}
+						try {
+							nativeCam.stopPreview();
+						} catch (Throwable ignored) {
+						}
+						nativeCam.release();
+						nativeCam = null;
+						Log.i("HHCamera", "native cam closed");
+					}
+				} catch (Throwable t) {
+					Log.e("HHCamera", "native close fail", t);
+				}
+			}
+		});
+	}
+	@UsedByGodot
+	public void hideNativePreview() {
+		nativeMode = false;
+		closeNativeCam();
+		final Activity act = getActivity();
+		if (act == null) {
+			return;
+		}
+		act.runOnUiThread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					if (nativeView != null) {
+						ViewGroup parent = (ViewGroup) nativeView.getParent();
+						if (parent != null) {
+							parent.removeView(nativeView);
+						}
+						nativeView = null;
+						Log.i("HHCamera", "native preview view removed");
+					}
+				} catch (Throwable t) {
+					Log.e("HHCamera", "hideNativePreview fail", t);
+				}
+			}
+		});
+	}
 	@Override
 	public void onMainPause() {
 		synchronized (lock) {
 			releaseCamera();
 		}
+		closeNativeCam();
 	}
 
 	@Override
@@ -912,6 +1142,9 @@ private void openCamera() {
 			if (wantActive && camera == null) {
 				startInternalLocked();
 			}
+		}
+		if (nativeMode && nativeCam == null && nativeView != null) {
+			openNativeCam(nativeView.getHolder());
 		}
 		if (tts == null || !ttsReady) {
 			ensureTts();

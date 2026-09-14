@@ -117,6 +117,9 @@ var _ar_use_ext := false
 var _ar_ext = null
 var _ar_hq := true
 var _ar_prefer_ext := false
+var _ar_native_on := false
+var _we: WorldEnvironment = null
+var _env: Environment = null
 var _ar_ext_seen := -1
 var _ar_ext_stall := 0.0
 var _ar_fc := 0
@@ -1333,7 +1336,7 @@ func _setup_ui() -> void:
 	ar_hq_check.toggled.connect(_on_ar_hq_toggled)
 	vbox.add_child(ar_hq_check)
 	var ar_ext_check := CheckBox.new()
-	ar_ext_check.text = "AR 原生直通（实验，本机可能不支持）"
+	ar_ext_check.text = "原生相机底（实验：真实画面铺在人物后）"
 	ar_ext_check.add_theme_font_size_override("font_size", 52)
 	ar_ext_check.toggled.connect(_on_ar_ext_toggled)
 	vbox.add_child(ar_ext_check)
@@ -1423,6 +1426,8 @@ func _show_status(msg: String) -> void:
 func _setup_environment() -> void:
 	var we := WorldEnvironment.new()
 	var env := Environment.new()
+	_we = we
+	_env = env
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.08, 0.09, 0.13)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
@@ -1466,6 +1471,8 @@ func _request_camera_permission() -> void:
 	_show_status("AR:请在弹窗里点「允许使用相机」(%d/3)" % _ar_req_count)
 
 func _start_ar_camera() -> void:
+	if _ar_native_on:
+		return
 	if _ar_start_ms == 0:
 		_ar_start_ms = Time.get_ticks_msec()
 	_build_ar_bg()
@@ -1522,6 +1529,12 @@ func _restart_ar_camera() -> void:
 
 func _tick_ar(delta: float) -> void:
 	if _ar_plugin == null:
+		return
+	if _ar_native_on:
+		_ar_hud_t += delta
+		if _ar_hud_t >= 2.0 and _status != null:
+			_ar_hud_t = 0.0
+			_status.text = "AR:原生相机（系统直显）"
 		return
 	if _ar_pending:
 		_ar_wait += delta
@@ -1626,10 +1639,32 @@ func _tick_ar(delta: float) -> void:
 		_ar_reset()
 
 func _on_ar_ext_toggled(on: bool) -> void:
-	_ar_prefer_ext = on
-	if _ar_plugin != null:
+	if _ar_plugin == null:
+		return
+	if on:
+		_ar_native_on = true
+		_ar_prefer_ext = false
+		if _ar_quad:
+			_ar_quad.visible = false
+		if _env:
+			_env.background_mode = Environment.BG_CLEAR_COLOR
+		RenderingServer.set_default_clear_color(Color(0.0, 0.0, 0.0, 0.0))
+		get_viewport().transparent_bg = true
+		_ar_plugin.stop()
+		_ar_plugin.showNativePreview()
+		_show_status("AR:原生相机底已开启（实验）")
+		print("[AR] native preview on")
+	else:
+		_ar_native_on = false
+		if _env:
+			_env.background_mode = Environment.BG_COLOR
+			_env.background_color = Color(0.08, 0.09, 0.13)
+		RenderingServer.set_default_clear_color(Color(0.08, 0.09, 0.13, 1.0))
+		get_viewport().transparent_bg = false
+		_ar_plugin.hideNativePreview()
 		_ar_reset()
-	_show_status("AR:直通(实验)" + ("开启，画面异常请关闭此开关" if on else "已关闭") + "，正在重连相机…")
+		_show_status("AR:原生相机底已关闭，切回兼容模式…")
+		print("[AR] native preview off")
 
 func _on_ar_hq_toggled(on: bool) -> void:
 	_ar_hq = on
@@ -1639,6 +1674,18 @@ func _on_ar_hq_toggled(on: bool) -> void:
 	_show_status("AR:已选" + ("高清模式" if on else "流畅模式") + "，正在重连相机…")
 
 func _on_ar_reset_pressed() -> void:
+	if _ar_native_on:
+		_ar_native_on = false
+		if _env:
+			_env.background_mode = Environment.BG_COLOR
+			_env.background_color = Color(0.08, 0.09, 0.13)
+		RenderingServer.set_default_clear_color(Color(0.08, 0.09, 0.13, 1.0))
+		get_viewport().transparent_bg = false
+		if _ar_plugin != null:
+			_ar_plugin.hideNativePreview()
+		_ar_reset()
+		_show_status("AR:已关闭原生相机，切回兼容模式…")
+		return
 	if _ar_prefer_ext:
 		_ar_prefer_ext = false
 		_show_status("AR:已切回兼容模式并重置相机…")
