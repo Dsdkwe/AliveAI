@@ -120,6 +120,8 @@ var _ar_prefer_ext := false
 var _ar_native_on := false
 var _ar_native_auto := false
 var _ar_auto_t := 0.0
+var _ar_native_checking := false
+var _ar_native_check_t := 0.0
 var _we: WorldEnvironment = null
 var _env: Environment = null
 var _ar_ext_seen := -1
@@ -1063,7 +1065,7 @@ func _setup_ui() -> void:
 
 	# ---- 聊天面板（底部）----
 	var panel_sb := StyleBoxFlat.new()
-	panel_sb.bg_color = Color(0.05, 0.06, 0.09, 0.82)
+	panel_sb.bg_color = Color(0.05, 0.06, 0.09, 0.45)
 	panel_sb.corner_radius_top_left = 20
 	panel_sb.corner_radius_top_right = 20
 	panel_sb.corner_radius_bottom_left = 20
@@ -1134,7 +1136,7 @@ func _setup_ui() -> void:
 	_sidebar.position = Vector2(-_sidebar_w, 0)
 	_sidebar.size = Vector2(_sidebar_w, view.y)
 	var panel_sd := StyleBoxFlat.new()
-	panel_sd.bg_color = Color(0.045, 0.052, 0.075, 0.97)
+	panel_sd.bg_color = Color(0.045, 0.052, 0.075, 0.86)
 	panel_sd.corner_radius_top_right = 28
 	panel_sd.corner_radius_bottom_right = 28
 	panel_sd.border_width_right = 2
@@ -1375,7 +1377,7 @@ func _setup_ui() -> void:
 	_menu_btn.size = Vector2(152, 152)
 	_menu_btn.add_theme_font_size_override("font_size", 92)
 	var mb_normal := StyleBoxFlat.new()
-	mb_normal.bg_color = Color(0.06, 0.07, 0.11, 0.78)
+	mb_normal.bg_color = Color(0.06, 0.07, 0.11, 0.55)
 	mb_normal.set_corner_radius_all(38)
 	mb_normal.border_width_left = 2
 	mb_normal.border_width_top = 2
@@ -1460,9 +1462,8 @@ func _setup_ar() -> void:
 		_ar_wait = 0.0
 		_request_camera_permission()
 		print("[AR] plugin found, waiting for camera permission")
-		_ar_native_auto = FileAccess.file_exists("/storage/emulated/0/Download/HalfHearted/native_auto.txt")
-		if _ar_native_auto:
-			print("[AR] native auto-test flag detected")
+		_ar_native_auto = true
+		print("[AR] native auto default on")
 	else:
 		print("[AR] plugin not found (desktop / non-plugin build) - dark background")
 		_show_status("AR:插件未加载（深色背景）")
@@ -1542,6 +1543,17 @@ func _tick_ar(delta: float) -> void:
 			print("[AR] native auto-test enabling")
 			_enable_native_mode()
 	if _ar_native_on:
+		if _ar_native_checking:
+			_ar_native_check_t += delta
+			if _ar_native_check_t > 5.0:
+				_ar_native_checking = false
+				if _ar_plugin.isNativeCamOk():
+					print("[AR] native cam ok")
+				else:
+					print("[AR] native cam not ok, fallback to compat")
+					_disable_native_mode()
+					_show_status("AR:原生相机打开失败，已切回兼容模式")
+					return
 		_ar_hud_t += delta
 		if _ar_hud_t >= 2.0 and _status != null:
 			_ar_hud_t = 0.0
@@ -1659,6 +1671,8 @@ func _enable_native_mode() -> void:
 	if _ar_plugin == null:
 		return
 	_ar_native_on = true
+	_ar_native_checking = true
+	_ar_native_check_t = 0.0
 	_ar_prefer_ext = false
 	if _ar_quad:
 		_ar_quad.visible = false

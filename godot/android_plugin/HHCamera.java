@@ -99,6 +99,7 @@ public class HHCamera extends GodotPlugin {
 	private volatile boolean nativeMode = false;
 	private volatile int nativeRetries = 0;
 	private volatile SurfaceView layerAppliedView = null;
+	private volatile boolean cam2Probed = false;
 
 	public HHCamera(Godot godot) {
 		super(godot);
@@ -918,6 +919,10 @@ private void openCamera() {
 		return nativeMode;
 	}
 	@UsedByGodot
+	public boolean isNativeCamOk() {
+		return nativeCam != null;
+	}
+	@UsedByGodot
 	public void showNativePreview() {
 		final Activity act = getActivity();
 		if (act == null) {
@@ -1009,6 +1014,52 @@ private void openCamera() {
 		}
 		Log.i("HHCamera", "attach walk found=" + found);
 	}
+	@UsedByGodot
+	public void probeCam2() {
+		try {
+			android.hardware.camera2.CameraManager mgr = (android.hardware.camera2.CameraManager) getActivity().getSystemService(android.content.Context.CAMERA_SERVICE);
+			if (mgr == null) {
+				Log.i("HHCamera", "cam2: no manager");
+				return;
+			}
+			String[] ids = mgr.getCameraIdList();
+			Log.i("HHCamera", "cam2 ids: " + java.util.Arrays.toString(ids));
+			for (String id : ids) {
+				try {
+					android.hardware.camera2.CameraCharacteristics cc = mgr.getCameraCharacteristics(id);
+					Integer lens = cc.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING);
+					android.hardware.camera2.params.StreamConfigurationMap map = cc.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+					StringBuilder sb = new StringBuilder();
+					boolean has4k = false;
+					if (map != null) {
+						android.util.Size[] sizes = map.getOutputSizes(android.graphics.SurfaceTexture.class);
+						if (sizes != null) {
+							for (android.util.Size sz : sizes) {
+								sb.append(sz.getWidth()).append("x").append(sz.getHeight()).append(" ");
+								if (sz.getWidth() >= 3840) {
+									has4k = true;
+								}
+							}
+						}
+					}
+					Log.i("HHCamera", "cam2 " + id + " lens=" + lens + " st: " + sb.toString());
+					Log.i("HHCamera", "cam2 " + id + " hasUhd=" + has4k);
+					android.util.Range<Integer>[] ae = cc.get(android.hardware.camera2.CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+					StringBuilder sb2 = new StringBuilder();
+					if (ae != null) {
+						for (android.util.Range<Integer> rg : ae) {
+							sb2.append(rg.getLower()).append("-").append(rg.getUpper()).append(" ");
+						}
+					}
+					Log.i("HHCamera", "cam2 " + id + " fps: " + sb2.toString());
+				} catch (Throwable t) {
+					Log.e("HHCamera", "cam2 " + id + " fail: " + t.getMessage());
+				}
+			}
+		} catch (Throwable t) {
+			Log.e("HHCamera", "cam2 probe fail: " + t.getMessage());
+		}
+	}
 	private void scheduleLayerAttach() {
 		final Activity act = getActivity();
 		if (act == null) {
@@ -1048,6 +1099,10 @@ private void openCamera() {
 				try {
 					if (nativeCam != null) {
 						return;
+					}
+					if (!cam2Probed) {
+						cam2Probed = true;
+						probeCam2();
 					}
 					Camera cam = Camera.open(0);
 					Camera.CameraInfo info = new Camera.CameraInfo();
@@ -1093,6 +1148,46 @@ private void openCamera() {
 					Log.i("HHCamera", "native chosen=" + (best != null ? (best.width + "x" + best.height) : "none"));
 					if (best != null) {
 						p.setPreviewSize(best.width, best.height);
+					}
+					try {
+						List<String> fm = p.getSupportedFocusModes();
+						StringBuilder sf = new StringBuilder();
+						if (fm != null) {
+							for (String m2 : fm) {
+								sf.append(m2).append(" ");
+							}
+						}
+						Log.i("HHCamera", "native focus modes: " + sf.toString());
+						if (fm != null) {
+							if (fm.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO)) {
+								p.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
+							} else if (fm.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
+								p.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
+							} else if (fm.contains(Camera.Parameters.FOCUS_MODE_AUTO)) {
+								p.setFocusMode(Camera.Parameters.FOCUS_MODE_AUTO);
+							}
+						}
+					} catch (Throwable tf) {
+						Log.e("HHCamera", "focus set fail: " + tf.getMessage());
+					}
+					try {
+						List<int[]> frs = p.getSupportedPreviewFpsRange();
+						StringBuilder sr = new StringBuilder();
+						int[] bestR = null;
+						if (frs != null) {
+							for (int[] rr : frs) {
+								sr.append(rr[0]).append("-").append(rr[1]).append(" ");
+								if (bestR == null || rr[1] > bestR[1]) {
+									bestR = rr;
+								}
+							}
+						}
+						Log.i("HHCamera", "native fps ranges: " + sr.toString());
+						if (bestR != null) {
+							p.setPreviewFpsRange(bestR[0], bestR[1]);
+						}
+					} catch (Throwable tf2) {
+						Log.e("HHCamera", "fps set fail: " + tf2.getMessage());
 					}
 					try {
 						cam.setParameters(p);
