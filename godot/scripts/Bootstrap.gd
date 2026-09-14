@@ -122,6 +122,10 @@ var _ar_native_auto := false
 var _ar_auto_t := 0.0
 var _ar_native_checking := false
 var _ar_native_check_t := 0.0
+var _ar_xs := 1.0
+var _ar_ys := 1.0
+var _ar_last_log_xs := 1.0
+var _ar_last_log_ys := 1.0
 var _we: WorldEnvironment = null
 var _env: Environment = null
 var _ar_ext_seen := -1
@@ -1354,6 +1358,30 @@ func _setup_ui() -> void:
 	rot_fix_btn.add_theme_font_size_override("font_size", 52)
 	rot_fix_btn.pressed.connect(_on_rot_fix_pressed)
 	vbox.add_child(rot_fix_btn)
+	var xs_lbl := Label.new()
+	xs_lbl.text = "横向比例（滑到自然为止）"
+	xs_lbl.add_theme_font_size_override("font_size", 48)
+	vbox.add_child(xs_lbl)
+	var xs_slider := HSlider.new()
+	xs_slider.min_value = 0.1
+	xs_slider.max_value = 5.0
+	xs_slider.step = 0.05
+	xs_slider.value = 1.0
+	xs_slider.custom_minimum_size = Vector2(600, 64)
+	xs_slider.value_changed.connect(_on_xs_changed)
+	vbox.add_child(xs_slider)
+	var ys_lbl := Label.new()
+	ys_lbl.text = "纵向比例（滑到自然为止）"
+	ys_lbl.add_theme_font_size_override("font_size", 48)
+	vbox.add_child(ys_lbl)
+	var ys_slider := HSlider.new()
+	ys_slider.min_value = 0.1
+	ys_slider.max_value = 5.0
+	ys_slider.step = 0.05
+	ys_slider.value = 1.0
+	ys_slider.custom_minimum_size = Vector2(600, 64)
+	ys_slider.value_changed.connect(_on_ys_changed)
+	vbox.add_child(ys_slider)
 
 	_clear_btn = Button.new()
 	_clear_btn.text = "清空对话记忆"
@@ -1710,6 +1738,22 @@ func _on_ar_hq_toggled(on: bool) -> void:
 		_ar_plugin.setHighQuality(on)
 		_ar_reset()
 	_show_status("AR:已选" + ("高清模式" if on else "流畅模式") + "，正在重连相机…")
+
+func _on_xs_changed(v: float) -> void:
+	_ar_xs = v
+	if absf(v - _ar_last_log_xs) > 0.04:
+		_ar_last_log_xs = v
+		print("[AR] user scale x=", v)
+	if _ar_plugin != null and _ar_native_on:
+		_ar_plugin.setExtraScale(_ar_xs, _ar_ys)
+
+func _on_ys_changed(v: float) -> void:
+	_ar_ys = v
+	if absf(v - _ar_last_log_ys) > 0.04:
+		_ar_last_log_ys = v
+		print("[AR] user scale y=", v)
+	if _ar_plugin != null and _ar_native_on:
+		_ar_plugin.setExtraScale(_ar_xs, _ar_ys)
 
 func _on_rot_fix_pressed() -> void:
 	if _ar_plugin != null and _ar_native_on:

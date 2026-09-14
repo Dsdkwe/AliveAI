@@ -110,6 +110,8 @@ public class HHCamera extends GodotPlugin {
 	private volatile int cam2BufW = 0;
 	private volatile int cam2BufH = 0;
 	private volatile int debugRotOffset = 0;
+	private volatile float extraScaleX = 1.0f;
+	private volatile float extraScaleY = 1.0f;
 
 	public HHCamera(Godot godot) {
 		super(godot);
@@ -1328,13 +1330,22 @@ private void openCamera() {
 					int fh = (dispOri % 180 == 90) ? vw : vh;
 					float s = Math.max((float) vw / fw, (float) vh / fh);
 					m.postScale(s, s, cx, cy);
+					if (extraScaleX != 1.0f || extraScaleY != 1.0f) {
+						m.postScale(extraScaleX, extraScaleY, cx, cy);
+					}
 					tv.setTransform(m);
-					Log.i("HHCamera", "tex transform rot=" + dispOri + " k=" + s + " view=" + vw + "x" + vh + " buf=" + cam2BufW + "x" + cam2BufH);
+					Log.i("HHCamera", "tex transform rot=" + dispOri + " k=" + s + " ex=" + extraScaleX + "," + extraScaleY + " view=" + vw + "x" + vh);
 				} catch (Throwable t) {
 					Log.e("HHCamera", "tex transform fail: " + t.getMessage());
 				}
 			}
 		});
+	}
+	@UsedByGodot
+	public void setExtraScale(float sx, float sy) {
+		extraScaleX = sx;
+		extraScaleY = sy;
+		applyTexTransform();
 	}
 	@UsedByGodot
 	public void cycleRotation() {
