@@ -50,6 +50,10 @@ const HEAD_SHAKE := [Vector3(0, 20, 0), Vector3(0, -20, 0), Vector3(0, 15, 0), V
 const HEAD_TILT := [Vector3(0, 0, 20), Vector3.ZERO]
 const ACTION_STEP_TIME := 0.24
 
+# 眼神追踪（看向相机/用户）
+const LOOKAT_EYE_GAIN := 1.35    # 眼睛跟随强度（方向余弦放大）
+const LOOKAT_HEAD_LIMIT := 18.0  # 头部额外转向上限（度）
+
 # 自然站姿（手臂下垂）：[骨骼名, 世界空间绕 Z 轴旋转角度(度)]，左负右正。
 # 通过「父骨骼全局逆 × 世界旋转 × 父骨骼全局」换算到骨骼局部空间，任意模型通用。
 const ARM_POSE_DEFS := [
@@ -93,6 +97,11 @@ var _act_timer := 0.0
 var _eye_dir := Vector2.ZERO
 var _eye_target := Vector2.ZERO
 var _eye_wander := 4.0
+var _eye_bias := Vector2.ZERO
+var _look_head := Vector3.ZERO
+var _look_head_t := Vector3.ZERO
+var _lookat_t := 0.0
+var _lookat_on := true
 
 var _jaw_angle := 0.0
 var _talking := false
@@ -144,6 +153,7 @@ func set_emotion(e: String) -> void:
 	_emotion = e
 	_head_target = EMOTION_HEAD.get(e, Vector3.ZERO)
 	_eye_target = EMOTION_EYES.get(e, Vector2.ZERO)
+	_eye_bias = _eye_target
 	_apply_emotion_shapes(e)
 	emotion_applied.emit(e)
 
@@ -274,8 +284,19 @@ func _tick_head(delta: float) -> void:
 				_act_seq = []
 				_act_target = Vector3.ZERO
 	_act_offset = _act_offset.lerp(_act_target, clampf(delta * 14.0, 0.0, 1.0))
+	# 看向镜头：头部轻跟随（保持自然，不抢情绪姿态的戏）
+	var cam_h := get_viewport().get_camera_3d()
+	if cam_h != null and _lookat_on and _skel and _head_idx >= 0:
+		var lr := _lookat_raw(cam_h)
+		_look_head_t = Vector3(
+			clampf(-lr.y * LOOKAT_HEAD_LIMIT, -LOOKAT_HEAD_LIMIT, LOOKAT_HEAD_LIMIT),
+			clampf(lr.x * LOOKAT_HEAD_LIMIT, -LOOKAT_HEAD_LIMIT, LOOKAT_HEAD_LIMIT),
+			0.0)
+	else:
+		_look_head_t = Vector3.ZERO
+	_look_head = _look_head.lerp(_look_head_t, clampf(delta * 4.0, 0.0, 1.0))
 	if _skel and _head_idx >= 0:
-		var total := _head_offset + _act_offset
+		var total := _head_offset + _act_offset + _look_head
 		var e := Vector3(deg_to_rad(total.x), deg_to_rad(total.y), deg_to_rad(total.z))
 		var q := Quaternion(Basis.from_euler(e))
 		_skel.set_bone_pose_rotation(_head_idx, q)
@@ -283,16 +304,41 @@ func _tick_head(delta: float) -> void:
 # ---------------------------------------------------------------- eyes
 
 func _tick_eyes(delta: float) -> void:
-	_eye_wander -= delta
-	if _eye_wander <= 0.0:
-		_eye_wander = randf_range(3.5, 7.5)
-		if _emotion == "neutral":
-			_eye_target = Vector2(randf_range(-0.5, 0.5), randf_range(-0.3, 0.3))
+	_lookat_t += delta
+	var cam := get_viewport().get_camera_3d()
+	if cam != null and _lookat_on:
+		var lt := _lookat_raw(cam) * LOOKAT_EYE_GAIN
+		lt += Vector2(sin(_lookat_t * 0.7) * 0.05, sin(_lookat_t * 0.9) * 0.04)
+		_eye_target = lt + _eye_bias * 0.35
+		_eye_target.x = clampf(_eye_target.x, -1.0, 1.0)
+		_eye_target.y = clampf(_eye_target.y, -1.0, 1.0)
+	else:
+		_eye_wander -= delta
+		if _eye_wander <= 0.0:
+			_eye_wander = randf_range(3.5, 7.5)
+			if _emotion == "neutral":
+				_eye_target = Vector2(randf_range(-0.5, 0.5), randf_range(-0.3, 0.3))
 	_eye_dir = _eye_dir.lerp(_eye_target, clampf(delta * 6.0, 0.0, 1.0))
 	if _skel and _eye_l_idx >= 0 and _eye_r_idx >= 0 and not _look_deltas.is_empty():
 		var q := _eye_pose(_eye_dir)
 		_skel.set_bone_pose_rotation(_eye_l_idx, q)
 		_skel.set_bone_pose_rotation(_eye_r_idx, q)
+
+func _lookat_raw(cam: Camera3D) -> Vector2:
+	# 返回相机方向在角色头部坐标系下的方向余弦 (左分量 l, 上分量 u)
+	var hx := _head_world_xform()
+	var rel := cam.global_position - hx.origin
+	if rel.length_squared() < 0.000001:
+		return Vector2.ZERO
+	rel = rel.normalized()
+	var l := rel.dot(hx.basis.x.normalized())
+	var u := rel.dot(hx.basis.y.normalized())
+	return Vector2(clampf(l, -1.0, 1.0), clampf(u, -1.0, 1.0))
+
+func _head_world_xform() -> Transform3D:
+	if _skel and _head_idx >= 0:
+		return _skel.global_transform * _skel.get_bone_global_pose(_head_idx)
+	return Transform3D(Basis(), _avatar.global_position + Vector3(0, 1.4, 0))
 
 func _eye_pose(dir: Vector2) -> Quaternion:
 	var q := _eye_def
