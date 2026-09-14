@@ -1313,6 +1313,8 @@ private void openCamera() {
 					int rd = rot * 90;
 					int sensor = 90;
 					int dispOri = (sensor - rd + 360) % 360;
+					// vivo HAL 实测将流顺时针转了 90 度，反向逆时针校正；按钮可再叠 0/90/180/270
+					dispOri = (dispOri + 270 + debugRotOffset) % 360;
 					int vw = tv.getWidth();
 					int vh = tv.getHeight();
 					if (vw <= 0 || vh <= 0) {
@@ -1322,10 +1324,9 @@ private void openCamera() {
 					float cy = vh * 0.5f;
 					android.graphics.Matrix m = new android.graphics.Matrix();
 					m.postRotate(dispOri, cx, cy);
-					double effW = (dispOri % 180 == 90) ? cam2BufH : cam2BufW;
-					double effH = (dispOri % 180 == 90) ? cam2BufW : cam2BufH;
-					double rA = (effW / effH) / ((double) vw / (double) vh);
-					float s = (float) Math.max(rA, 1.0 / rA);
+					int fw = (dispOri % 180 == 90) ? vh : vw;
+					int fh = (dispOri % 180 == 90) ? vw : vh;
+					float s = Math.max((float) vw / fw, (float) vh / fh);
 					m.postScale(s, s, cx, cy);
 					tv.setTransform(m);
 					Log.i("HHCamera", "tex transform rot=" + dispOri + " k=" + s + " view=" + vw + "x" + vh + " buf=" + cam2BufW + "x" + cam2BufH);
