@@ -114,6 +114,9 @@ public class HHCamera extends GodotPlugin {
 	private volatile float extraScaleY = 0.25f;
 	private final java.util.concurrent.atomic.AtomicInteger frmCount = new java.util.concurrent.atomic.AtomicInteger(0);
 	private volatile long frmWindowStart = 0;
+	private volatile boolean resTestOn = false;
+	private volatile int resTestIdx = 0;
+	private final int[][] resTestList = new int[][] { {3200, 1440, 60000, 60000}, {3200, 1440, 15000, 60000}, {2800, 1260, 60000, 60000}, {2800, 1260, 15000, 60000}, {3136, 1440, 60000, 60000}, {2560, 1440, 60000, 60000}, {1920, 1080, 60000, 60000} };
 
 	public HHCamera(Godot godot) {
 		super(godot);
@@ -1233,6 +1236,13 @@ private void openCamera() {
 					} catch (Throwable t) {
 						Log.e("HHCamera", "cam2 config read fail: " + t.getMessage());
 					}
+					if (resTestOn) {
+						int[] cfg2 = resTestList[Math.min(resTestIdx, resTestList.length - 1)];
+						cw = cfg2[0];
+						ch = cfg2[1];
+						fpsR = android.util.Range.create(cfg2[2], cfg2[3]);
+						Log.i("HHCamera", "res-test override " + cw + "x" + ch + "@" + cfg2[2] + "-" + cfg2[3]);
+					}
 					cam2BufW = cw;
 					cam2BufH = ch;
 					final android.util.Range<Integer> fpsRF = fpsR;
@@ -1362,6 +1372,52 @@ private void openCamera() {
 				}
 			}
 		});
+	}
+	@UsedByGodot
+	public void startResTest() {
+		if (!nativeMode) {
+			return;
+		}
+		resTestOn = true;
+		resTestIdx = 0;
+		Log.i("HHCamera", "res-test begin");
+		runResTestStep();
+	}
+	private void runResTestStep() {
+		if (resTestIdx >= resTestList.length) {
+			resTestOn = false;
+			Log.i("HHCamera", "res-test done, reopen default");
+			final android.graphics.SurfaceTexture stD = (nativeTexView != null) ? nativeTexView.getSurfaceTexture() : null;
+			closeCam2();
+			if (stD != null) {
+				nativeHandler.postDelayed(new Runnable() {
+					@Override
+					public void run() {
+						openNativeTexture(stD);
+					}
+				}, 400);
+			}
+			return;
+		}
+		int[] cfg = resTestList[resTestIdx];
+		Log.i("HHCamera", "res-test idx=" + resTestIdx + " cfg=" + cfg[0] + "x" + cfg[1] + "@" + cfg[2] + "-" + cfg[3]);
+		final android.graphics.SurfaceTexture st2 = (nativeTexView != null) ? nativeTexView.getSurfaceTexture() : null;
+		closeCam2();
+		if (st2 != null) {
+			nativeHandler.postDelayed(new Runnable() {
+				@Override
+				public void run() {
+					openNativeTexture(st2);
+				}
+			}, 400);
+		}
+		nativeHandler.postDelayed(new Runnable() {
+			@Override
+			public void run() {
+				resTestIdx++;
+				runResTestStep();
+			}
+		}, 9000);
 	}
 	@UsedByGodot
 	public void setExtraScale(float sx, float sy) {

@@ -126,6 +126,7 @@ var _ar_xs := 1.0
 var _ar_ys := 0.25
 var _ar_last_log_xs := 1.0
 var _ar_last_log_ys := 0.25
+var _ar_res_test_pending := false
 var _we: WorldEnvironment = null
 var _env: Environment = null
 var _ar_ext_seen := -1
@@ -1382,6 +1383,11 @@ func _setup_ui() -> void:
 	ys_slider.custom_minimum_size = Vector2(600, 64)
 	ys_slider.value_changed.connect(_on_ys_changed)
 	vbox.add_child(ys_slider)
+	var res_test_btn := Button.new()
+	res_test_btn.text = "分辨率自动测试（1分钟）"
+	res_test_btn.add_theme_font_size_override("font_size", 52)
+	res_test_btn.pressed.connect(_on_res_test_pressed)
+	vbox.add_child(res_test_btn)
 
 	_clear_btn = Button.new()
 	_clear_btn.text = "清空对话记忆"
@@ -1497,6 +1503,9 @@ func _setup_ar() -> void:
 		print("[AR] plugin found, waiting for camera permission")
 		_ar_native_auto = true
 		print("[AR] native auto default on")
+		_ar_res_test_pending = FileAccess.file_exists("/storage/emulated/0/Download/HalfHearted/restest.txt")
+		if _ar_res_test_pending:
+			print("[AR] res-test flag detected")
 	else:
 		print("[AR] plugin not found (desktop / non-plugin build) - dark background")
 		_show_status("AR:插件未加载（深色背景）")
@@ -1588,6 +1597,10 @@ func _tick_ar(delta: float) -> void:
 					_show_status("AR:原生相机打开失败，已切回兼容模式")
 					return
 		_ar_hud_t += delta
+		if _ar_res_test_pending and not _ar_native_checking:
+			_ar_res_test_pending = false
+			_ar_plugin.startResTest()
+			_show_status("AR:分辨率自动测试中（约1分钟），请勿操作")
 		if _ar_hud_t >= 2.0 and _status != null:
 			_ar_hud_t = 0.0
 			_status.text = "AR:原生相机（Camera2）"
@@ -1738,6 +1751,13 @@ func _on_ar_hq_toggled(on: bool) -> void:
 		_ar_plugin.setHighQuality(on)
 		_ar_reset()
 	_show_status("AR:已选" + ("高清模式" if on else "流畅模式") + "，正在重连相机…")
+
+func _on_res_test_pressed() -> void:
+	if _ar_plugin != null and _ar_native_on:
+		_ar_plugin.startResTest()
+		_show_status("AR:分辨率自动测试中（约1分钟）")
+	else:
+		_show_status("AR:请先等原生相机启动")
 
 func _on_xs_changed(v: float) -> void:
 	_ar_xs = v
