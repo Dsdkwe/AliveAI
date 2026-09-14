@@ -964,6 +964,11 @@ private void openCamera() {
 						}
 						@Override
 						public void onSurfaceTextureSizeChanged(android.graphics.SurfaceTexture st, int width, int height) {
+							Log.i("HHCamera", "tex size changed " + width + "x" + height);
+							if (width > 0 && height > 0) {
+								cam2BufW = width;
+								cam2BufH = height;
+							}
 							applyTexTransform();
 						}
 						@Override
@@ -1306,10 +1311,11 @@ private void openCamera() {
 					m.postRotate(dispOri, cx, cy);
 					double effW = (dispOri % 180 == 90) ? cam2BufH : cam2BufW;
 					double effH = (dispOri % 180 == 90) ? cam2BufW : cam2BufH;
-					float s = (float) Math.max(vw / effW, vh / effH);
+					double rA = (effW / effH) / ((double) vw / (double) vh);
+					float s = (float) Math.max(rA, 1.0 / rA);
 					m.postScale(s, s, cx, cy);
 					tv.setTransform(m);
-					Log.i("HHCamera", "tex transform rot=" + dispOri + " scale=" + s + " view=" + vw + "x" + vh);
+					Log.i("HHCamera", "tex transform rot=" + dispOri + " k=" + s + " view=" + vw + "x" + vh + " buf=" + cam2BufW + "x" + cam2BufH);
 				} catch (Throwable t) {
 					Log.e("HHCamera", "tex transform fail: " + t.getMessage());
 				}
