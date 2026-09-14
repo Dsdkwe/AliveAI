@@ -29,3 +29,9 @@ general/text_to_speech=true
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/vrm/plugin.cfg", "res://addons/Godot-MToon-Shader/plugin.cfg")
+
+[input_devices]
+
+sensors/enable_gyroscope=true
+sensors/enable_accelerometer=true
+sensors/enable_gravity=true

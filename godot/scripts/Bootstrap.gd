@@ -3,6 +3,15 @@ extends Node3D
 var _avatar: Node3D = null
 var _cube: MeshInstance3D = null
 var _cam: Camera3D = null
+var _cam_base := Transform3D()
+var _cam_base_valid := false
+var _ar_follow := true
+var _imu_engaged := false
+var _imu_g_ref := Vector3.ZERO
+var _imu_g_now := Vector3.ZERO
+var _imu_yaw := 0.0
+var _imu_yaw_bias := 0.0
+var _shadow: MeshInstance3D = null
 
 var _ui_layer: CanvasLayer = null
 var _menu_btn: Button = null
@@ -171,6 +180,7 @@ func _notification(what: int) -> void:
 			_ar_reset()
 
 func _process(_delta: float) -> void:
+	_tick_ar_follow(_delta)
 	if _downloading and _dl_http and _dl_label:
 		var got := _dl_http.get_downloaded_bytes()
 		var total := _dl_http.get_body_size()
@@ -357,6 +367,7 @@ func _load_vrm(path: String) -> void:
 	_cur_model_path = path
 	_save_last_model(path)
 	_show_status("已加载模型：" + path.get_file())
+	_ensure_foot_shadow()
 
 func _apply_current_transforms() -> void:
 	if not _avatar:
@@ -924,6 +935,99 @@ func _update_camera() -> void:
 	)
 	_cam.position = target + off
 	_cam.look_at(target)
+	_cam_base = _cam.transform
+	_cam_base_valid = true
+	_apply_cam_imu()
+
+# ---------------------------------------------------------------- AR 站位归地（IMU跟随/阴影/站立视角）
+
+func _tick_ar_follow(delta: float) -> void:
+	var active := _ar_native_on and _ar_follow
+	if active:
+		var g := Input.get_gravity()
+		if g.length() < 0.05:
+			g = Input.get_accelerometer()
+		if g.length() > 0.05:
+			g = g.normalized()
+		if g.length() > 0.05:
+			if not _imu_engaged:
+				_imu_engaged = true
+				_imu_g_ref = g
+				_imu_g_now = g
+				_imu_yaw = 0.0
+				_imu_yaw_bias = 0.0
+				print("[AR] imu follow engage g=", g, " gyro=", Input.get_gyroscope())
+			_imu_g_now = _imu_g_now.lerp(g, clampf(delta * 12.0, 0.0, 1.0))
+			if _imu_g_now.length() > 0.05:
+				_imu_g_now = _imu_g_now.normalized()
+			var gy := Input.get_gyroscope()
+			if gy.length() > 0.0001:
+				var wup := gy.dot(_imu_g_now)
+				if absf(wup - _imu_yaw_bias) < 0.08:
+					_imu_yaw_bias += (wup - _imu_yaw_bias) * minf(delta * 0.6, 1.0)
+				_imu_yaw += (wup - _imu_yaw_bias) * delta
+				_imu_yaw = clampf(_imu_yaw, -2.0, 2.0)
+	else:
+		_imu_engaged = false
+		_imu_yaw = lerpf(_imu_yaw, 0.0, clampf(delta * 3.0, 0.0, 1.0))
+		if _imu_g_ref.length() > 0.5 and _imu_g_now.length() > 0.5:
+			_imu_g_now = _imu_g_now.normalized().lerp(_imu_g_ref.normalized(), clampf(delta * 3.0, 0.0, 1.0)).normalized()
+	_apply_cam_imu()
+
+func _apply_cam_imu() -> void:
+	if _cam == null:
+		return
+	if not _cam_base_valid:
+		_cam_base = _cam.transform
+		_cam_base_valid = true
+	var b := _cam_base.basis
+	if absf(_imu_yaw) > 0.00001:
+		b = Basis(Vector3.UP, _imu_yaw) * b
+	if _imu_g_ref.length() > 0.5 and _imu_g_now.length() > 0.5:
+		var q := Quaternion(_imu_g_ref.normalized(), _imu_g_now.normalized())
+		b = b * Basis(q.inverse())
+	_cam.transform = Transform3D(b, _cam_base.origin)
+
+func _ensure_foot_shadow() -> void:
+	if _shadow != null and is_instance_valid(_shadow):
+		_shadow.queue_free()
+	_shadow = null
+	if _avatar == null:
+		return
+	var img := Image.create(128, 128, false, Image.FORMAT_RGBA8)
+	var c := Vector2(63.5, 63.5)
+	for y in range(128):
+		for x in range(128):
+			var d := Vector2(x, y).distance_to(c) / 62.0
+			var a := clampf(1.0 - d, 0.0, 1.0)
+			a = a * a * 0.5
+			img.set_pixel(x, y, Color(0, 0, 0, a))
+	var tex := ImageTexture.create_from_image(img)
+	var quad := QuadMesh.new()
+	quad.size = Vector2(1.35, 1.0)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = tex
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_shadow = MeshInstance3D.new()
+	_shadow.mesh = quad
+	_shadow.material_override = mat
+	_shadow.rotation.x = deg_to_rad(-90.0)
+	_shadow.position = Vector3(0, 0.02, 0)
+	_avatar.add_child(_shadow)
+	print("[AR] foot shadow added")
+
+func _on_ar_follow_toggled(on: bool) -> void:
+	_ar_follow = on
+	_show_status("AR:视角跟随手机 " + ("开" if on else "关"))
+
+func _on_stand_view_pressed() -> void:
+	if _dist_slider:
+		_dist_slider.value = 3.6
+	if _pitch_slider:
+		_pitch_slider.value = 10.0
+	_show_status("AR:站立视角（全身落地），可再用滑条微调")
 
 # ------------------------------------------------------------------ AI 接线
 
@@ -1352,6 +1456,17 @@ func _setup_ui() -> void:
 	ar_ext_check.add_theme_font_size_override("font_size", 52)
 	ar_ext_check.toggled.connect(_on_ar_ext_toggled)
 	vbox.add_child(ar_ext_check)
+	var ar_follow_check := CheckBox.new()
+	ar_follow_check.text = "视角跟随手机（水平线对齐·站立感）"
+	ar_follow_check.add_theme_font_size_override("font_size", 52)
+	ar_follow_check.button_pressed = _ar_follow
+	ar_follow_check.toggled.connect(_on_ar_follow_toggled)
+	vbox.add_child(ar_follow_check)
+	var stand_view_btn := Button.new()
+	stand_view_btn.text = "AR 站立视角（全身落地）"
+	stand_view_btn.add_theme_font_size_override("font_size", 52)
+	stand_view_btn.pressed.connect(_on_stand_view_pressed)
+	vbox.add_child(stand_view_btn)
 	var ar_reset_btn := Button.new()
 	ar_reset_btn.text = "AR 重置（重启相机）"
 	ar_reset_btn.add_theme_font_size_override("font_size", 52)
