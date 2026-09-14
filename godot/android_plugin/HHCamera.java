@@ -109,6 +109,7 @@ public class HHCamera extends GodotPlugin {
 	private volatile boolean cam2FallbackDone = false;
 	private volatile int cam2BufW = 0;
 	private volatile int cam2BufH = 0;
+	private volatile int debugRotOffset = 0;
 
 	public HHCamera(Godot godot) {
 		super(godot);
@@ -1240,6 +1241,18 @@ private void openCamera() {
 											try {
 												session.setRepeatingRequest(b.build(), null, nativeHandler);
 												Log.i("HHCamera", "cam2 preview started fps=" + fpsRF);
+												final android.graphics.SurfaceTexture stF = st;
+												nativeHandler.postDelayed(new Runnable() {
+													@Override
+													public void run() {
+														try {
+															float[] tm = new float[16];
+															stF.getTransformMatrix(tm);
+															Log.i("HHCamera", "st tm: " + tm[0] + " " + tm[1] + " " + tm[4] + " " + tm[5]);
+														} catch (Throwable ignored) {
+														}
+													}
+												}, 900);
 											} catch (Throwable t) {
 												Log.e("HHCamera", "cam2 fps req fail, retry default: " + t.getMessage());
 												b.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, null);
@@ -1321,6 +1334,12 @@ private void openCamera() {
 				}
 			}
 		});
+	}
+	@UsedByGodot
+	public void cycleRotation() {
+		debugRotOffset = (debugRotOffset + 90) % 360;
+		Log.i("HHCamera", "debug rot offset=" + debugRotOffset);
+		applyTexTransform();
 	}
 	@UsedByGodot
 	public void refreshNativeTransform() {

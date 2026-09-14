@@ -1349,6 +1349,11 @@ func _setup_ui() -> void:
 	ar_reset_btn.add_theme_font_size_override("font_size", 52)
 	ar_reset_btn.pressed.connect(_on_ar_reset_pressed)
 	vbox.add_child(ar_reset_btn)
+	var rot_fix_btn := Button.new()
+	rot_fix_btn.text = "旋转校正（连点直到画面正）"
+	rot_fix_btn.add_theme_font_size_override("font_size", 52)
+	rot_fix_btn.pressed.connect(_on_rot_fix_pressed)
+	vbox.add_child(rot_fix_btn)
 
 	_clear_btn = Button.new()
 	_clear_btn.text = "清空对话记忆"
@@ -1705,6 +1710,13 @@ func _on_ar_hq_toggled(on: bool) -> void:
 		_ar_plugin.setHighQuality(on)
 		_ar_reset()
 	_show_status("AR:已选" + ("高清模式" if on else "流畅模式") + "，正在重连相机…")
+
+func _on_rot_fix_pressed() -> void:
+	if _ar_plugin != null and _ar_native_on:
+		_ar_plugin.cycleRotation()
+		_show_status("AR:旋转已调整一次（每点一次转90°，转正为止）")
+	else:
+		_show_status("AR:请先等原生相机启动后再用旋转校正")
 
 func _on_ar_reset_pressed() -> void:
 	if _ar_native_on:
