@@ -118,6 +118,8 @@ var _ar_ext = null
 var _ar_hq := true
 var _ar_prefer_ext := false
 var _ar_native_on := false
+var _ar_native_auto := false
+var _ar_auto_t := 0.0
 var _we: WorldEnvironment = null
 var _env: Environment = null
 var _ar_ext_seen := -1
@@ -1458,6 +1460,9 @@ func _setup_ar() -> void:
 		_ar_wait = 0.0
 		_request_camera_permission()
 		print("[AR] plugin found, waiting for camera permission")
+		_ar_native_auto = FileAccess.file_exists("/storage/emulated/0/Download/HalfHearted/native_auto.txt")
+		if _ar_native_auto:
+			print("[AR] native auto-test flag detected")
 	else:
 		print("[AR] plugin not found (desktop / non-plugin build) - dark background")
 		_show_status("AR:插件未加载（深色背景）")
@@ -1530,6 +1535,12 @@ func _restart_ar_camera() -> void:
 func _tick_ar(delta: float) -> void:
 	if _ar_plugin == null:
 		return
+	if _ar_native_auto and not _ar_native_on:
+		_ar_auto_t += delta
+		if _ar_auto_t > 2.5 and _camera_granted():
+			_ar_native_auto = false
+			print("[AR] native auto-test enabling")
+			_enable_native_mode()
 	if _ar_native_on:
 		_ar_hud_t += delta
 		if _ar_hud_t >= 2.0 and _status != null:
@@ -1639,32 +1650,39 @@ func _tick_ar(delta: float) -> void:
 		_ar_reset()
 
 func _on_ar_ext_toggled(on: bool) -> void:
+	if on:
+		_enable_native_mode()
+	else:
+		_disable_native_mode()
+
+func _enable_native_mode() -> void:
 	if _ar_plugin == null:
 		return
-	if on:
-		_ar_native_on = true
-		_ar_prefer_ext = false
-		if _ar_quad:
-			_ar_quad.visible = false
-		if _env:
-			_env.background_mode = Environment.BG_CLEAR_COLOR
-		RenderingServer.set_default_clear_color(Color(0.0, 0.0, 0.0, 0.0))
-		get_viewport().transparent_bg = true
-		_ar_plugin.stop()
-		_ar_plugin.showNativePreview()
-		_show_status("AR:原生相机底已开启（实验）")
-		print("[AR] native preview on")
-	else:
-		_ar_native_on = false
-		if _env:
-			_env.background_mode = Environment.BG_COLOR
-			_env.background_color = Color(0.08, 0.09, 0.13)
-		RenderingServer.set_default_clear_color(Color(0.08, 0.09, 0.13, 1.0))
-		get_viewport().transparent_bg = false
+	_ar_native_on = true
+	_ar_prefer_ext = false
+	if _ar_quad:
+		_ar_quad.visible = false
+	if _env:
+		_env.background_mode = Environment.BG_CLEAR_COLOR
+	RenderingServer.set_default_clear_color(Color(0.0, 0.0, 0.0, 0.0))
+	get_viewport().transparent_bg = true
+	_ar_plugin.stop()
+	_ar_plugin.showNativePreview()
+	_show_status("AR:原生相机底已开启（实验）")
+	print("[AR] native preview on")
+
+func _disable_native_mode() -> void:
+	_ar_native_on = false
+	if _env:
+		_env.background_mode = Environment.BG_COLOR
+		_env.background_color = Color(0.08, 0.09, 0.13)
+	RenderingServer.set_default_clear_color(Color(0.08, 0.09, 0.13, 1.0))
+	get_viewport().transparent_bg = false
+	if _ar_plugin != null:
 		_ar_plugin.hideNativePreview()
-		_ar_reset()
-		_show_status("AR:原生相机底已关闭，切回兼容模式…")
-		print("[AR] native preview off")
+	_ar_reset()
+	_show_status("AR:原生相机底已关闭，切回兼容模式…")
+	print("[AR] native preview off")
 
 func _on_ar_hq_toggled(on: bool) -> void:
 	_ar_hq = on
@@ -1675,16 +1693,7 @@ func _on_ar_hq_toggled(on: bool) -> void:
 
 func _on_ar_reset_pressed() -> void:
 	if _ar_native_on:
-		_ar_native_on = false
-		if _env:
-			_env.background_mode = Environment.BG_COLOR
-			_env.background_color = Color(0.08, 0.09, 0.13)
-		RenderingServer.set_default_clear_color(Color(0.08, 0.09, 0.13, 1.0))
-		get_viewport().transparent_bg = false
-		if _ar_plugin != null:
-			_ar_plugin.hideNativePreview()
-		_ar_reset()
-		_show_status("AR:已关闭原生相机，切回兼容模式…")
+		_disable_native_mode()
 		return
 	if _ar_prefer_ext:
 		_ar_prefer_ext = false

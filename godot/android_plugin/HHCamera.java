@@ -962,23 +962,7 @@ private void openCamera() {
 				}
 			}
 		});
-		act.getWindow().getDecorView().postDelayed(new Runnable() {
-			@Override
-			public void run() {
-				final Activity a2 = getActivity();
-				if (a2 == null || !nativeMode) {
-					return;
-				}
-				try {
-					ViewGroup r2 = (ViewGroup) a2.findViewById(android.R.id.content);
-					if (r2.getChildCount() > 0 && r2.getChildAt(0) instanceof ViewGroup) {
-						r2 = (ViewGroup) r2.getChildAt(0);
-					}
-					attachTransparentLayers(r2);
-				} catch (Throwable ignored) {
-				}
-			}
-		}, 1800);
+		scheduleLayerAttach();
 	}
 	private void attachTransparentLayers(ViewGroup root) {
 		try {
@@ -987,7 +971,7 @@ private void openCamera() {
 				if (v instanceof GLSurfaceView) {
 					try {
 						GLSurfaceView gv = (GLSurfaceView) v;
-						gv.setZOrderMediaOverlay(true);
+						gv.setZOrderOnTop(true);
 						gv.getHolder().setFormat(PixelFormat.TRANSLUCENT);
 						Log.i("HHCamera", "translucent layer set on " + gv.getClass().getName());
 					} catch (Throwable t) {
@@ -999,6 +983,29 @@ private void openCamera() {
 				}
 			}
 		} catch (Throwable ignored) {
+		}
+	}
+	private void scheduleLayerAttach() {
+		final Activity act = getActivity();
+		if (act == null) {
+			return;
+		}
+		final View decor = act.getWindow().getDecorView();
+		final long[] delays = { 60L, 200L, 500L, 1000L, 2000L, 3500L };
+		for (final long d : delays) {
+			decor.postDelayed(new Runnable() {
+				@Override
+				public void run() {
+					try {
+						ViewGroup root = (ViewGroup) act.findViewById(android.R.id.content);
+						if (root.getChildCount() > 0 && root.getChildAt(0) instanceof ViewGroup) {
+							root = (ViewGroup) root.getChildAt(0);
+						}
+						attachTransparentLayers(root);
+					} catch (Throwable ignored) {
+					}
+				}
+			}, d);
 		}
 	}
 	private void openNativeCam(final SurfaceHolder holder) {
@@ -1021,27 +1028,74 @@ private void openCamera() {
 						return;
 					}
 					Camera cam = Camera.open(0);
+					Camera.CameraInfo info = new Camera.CameraInfo();
+					Camera.getCameraInfo(0, info);
 					Camera.Parameters p = cam.getParameters();
 					List<Camera.Size> sizes = p.getSupportedPreviewSizes();
+					if (sizes == null) {
+						sizes = new java.util.ArrayList<Camera.Size>();
+					}
+					StringBuilder sb = new StringBuilder();
+					for (Camera.Size s : sizes) {
+						sb.append(s.width).append("x").append(s.height).append(" ");
+					}
+					Log.i("HHCamera", "native sizes: " + sb.toString());
 					Camera.Size best = null;
 					for (Camera.Size s : sizes) {
 						if (s.width == 2800 && s.height == 1260) {
 							best = s;
 							break;
 						}
-						if (best == null || (s.width <= 2800 && (long) s.width * s.height > (long) best.width * best.height)) {
-							best = s;
+					}
+					if (best == null) {
+						double bestScore = 1e9;
+						for (Camera.Size s : sizes) {
+							if (s.width < 1920) {
+								continue;
+							}
+							double asp = (double) s.width / (double) s.height;
+							double score = Math.abs(asp - 2.2222);
+							if (score < bestScore) {
+								bestScore = score;
+								best = s;
+							}
 						}
 					}
+					if (best == null) {
+						for (Camera.Size s : sizes) {
+							if (best == null || (long) s.width * s.height > (long) best.width * best.height) {
+								best = s;
+							}
+						}
+					}
+					Log.i("HHCamera", "native chosen=" + (best != null ? (best.width + "x" + best.height) : "none"));
 					if (best != null) {
 						p.setPreviewSize(best.width, best.height);
 					}
 					try {
 						cam.setParameters(p);
 					} catch (Throwable t) {
-						Log.e("HHCamera", "native setParameters fail", t);
+						Log.e("HHCamera", "native setParameters fail: " + t.getMessage());
+						try {
+							Camera.Parameters p2 = cam.getParameters();
+							if (best != null) {
+								p2.setPreviewSize(best.width, best.height);
+							}
+							cam.setParameters(p2);
+						} catch (Throwable t2) {
+							Log.e("HHCamera", "native setParameters retry fail: " + t2.getMessage());
+						}
 					}
-					cam.setDisplayOrientation(90);
+					Camera.Parameters pc = cam.getParameters();
+					Log.i("HHCamera", "native confirm sz=" + pc.getPreviewSize().width + "x" + pc.getPreviewSize().height);
+					int dispOri = 90;
+					try {
+						int rot = getActivity().getWindowManager().getDefaultDisplay().getRotation();
+						dispOri = (info.orientation - rot * 90 + 360) % 360;
+					} catch (Throwable ignoredR) {
+					}
+					cam.setDisplayOrientation(dispOri);
+					Log.i("HHCamera", "native sensor=" + info.orientation + " disp=" + dispOri);
 					cam.setPreviewDisplay(holder);
 					cam.startPreview();
 					nativeCam = cam;
@@ -1146,6 +1200,7 @@ private void openCamera() {
 		if (nativeMode && nativeCam == null && nativeView != null) {
 			openNativeCam(nativeView.getHolder());
 		}
+		scheduleLayerAttach();
 		if (tts == null || !ttsReady) {
 			ensureTts();
 		} else {
